@@ -789,7 +789,7 @@ def test_tagger_diagnostics_is_local_and_the_any_token_routes_carry_no_host_path
             assert inspected >= 8, f"only {inspected} of {len(reachable)} answered 200"
 
 
-def test_the_plugin_routes_survive_the_documented_gate_rollback():
+def test_owner_only_path_disclosing_gets_survive_the_documented_gate_rollback():
     """The second belt: ``READ_BLOCKED_GET_PATHS``, with the gate switched off.
 
     ``AUTHZ_GATE_ENFORCING = False`` is a documented one-line rollback, and
@@ -798,6 +798,16 @@ def test_the_plugin_routes_survive_the_documented_gate_rollback():
     tier, so they need the same pair - a fact the #326 review reproduced by
     reading the owner's home directory out of the diagnostics route with the
     gate off. The owner (no token, session cookie) is unaffected either way.
+
+    ``GET /insights`` and ``GET /moves/pending`` are here for the same reason
+    and were the #1177 item 11 finding: both are plain ``OWNER_ONLY`` rather
+    than locality-tier, both serve absolute host paths (the folder behind every
+    insight finding; ``old_path``/``new_path`` for every externally-moved file),
+    and the belt derivation that would have caught them only looked at the
+    locality tier. The owner assertions below are not decoration - the READ
+    middleware runs ahead of routing, so a renamed or dead path 403s a share
+    token exactly like a real refusal, and the owner's 200 is what proves the
+    negative was measured against a live route.
     """
     with _owner_env() as env:
         server, owner = env["server"], env["owner"]
@@ -822,32 +832,60 @@ def test_the_plugin_routes_survive_the_documented_gate_rollback():
             assert anon.get(f"{API}/pictures", headers=share).status_code == 200, (
                 "the share token is dead; the refusals below would prove nothing"
             )
-            for route in (_TAGGER_DIAGNOSTICS, f"{API}/taggers"):
+            routes = (
+                _TAGGER_DIAGNOSTICS,
+                f"{API}/taggers",
+                f"{API}/insights",
+                f"{API}/moves/pending",
+            )
+            for route in routes:
                 refused = anon.get(route, headers=share)
                 assert refused.status_code == 403, (
                     f"{route} must stay closed to a READ token with the gate "
                     f"off; got {refused.status_code}"
                 )
-            # The owner still reaches both, from the same middleware.
-            assert owner.get(_TAGGER_DIAGNOSTICS).status_code == 200
-            assert owner.get(f"{API}/taggers").status_code == 200
+            # The owner still reaches every one, from the same middleware -
+            # which is also the proof that each path above is a live route and
+            # not a 403 from the READ middleware refusing a name nothing serves.
+            for route in routes:
+                allowed = owner.get(route)
+                assert allowed.status_code == 200, (
+                    f"{route} must still answer the owner; got "
+                    f"{allowed.status_code} - {allowed.text}"
+                )
         finally:
             server.authz._enforcing = previously_enforcing
 
 
-def test_every_untemplated_locality_get_is_on_the_read_blocked_belt():
+def test_every_untemplated_owner_class_get_is_on_the_read_blocked_belt():
     """Derive the belt's membership instead of writing it down.
 
-    ``READ_BLOCKED_GET_PATHS`` matches literal paths, so a GET on the locality
-    tier is only protected under the documented ``AUTHZ_GATE_ENFORCING = False``
+    ``READ_BLOCKED_GET_PATHS`` matches literal paths, so an owner-class GET is
+    only protected under the documented ``AUTHZ_GATE_ENFORCING = False``
     rollback if its own path is in that frozenset. The rollback test beside this
     one names two paths; this one asserts the *rule*, so the next such GET fails
     the build rather than waiting for a review to notice it.
 
+    **The rule covers the whole owner class, not just the locality tier
+    (#1177 item 11).** It used to stop at ``LOCAL_OWNER_ONLY`` /
+    ``LOOPBACK_OWNER_ONLY``, on the reading that those are the routes exercising
+    host authority - and that is true of what they *do*, but the belt is about
+    what a share token may *see* under the rollback. ``GET /insights`` returns
+    the absolute path of the folder behind every finding and
+    ``GET /moves/pending`` returns ``old_path``/``new_path`` for every file the
+    owner moved outside PixlStash; both are ``OWNER_ONLY``, both were off the
+    belt, and this derivation - the one thing that would have caught it - did
+    not look at them. Widening it also removes the judgement call: an entry is
+    owed by *tier*, not by someone grading the payload.
+
     The templated ones cannot be expressed in an exact-match frozenset at all.
-    They are pinned as a known set rather than ignored: adding a fourth fails
-    here, and closing the gap needs prefix matching (the follow-up recorded in
-    ``tests/test_model_shelf_api.py`` and ``docs/backend_architecture.md`` §16.3).
+    The locality-tier ones are pinned as a known set rather than ignored: adding
+    a sixth fails here, and closing the gap needs prefix matching (the follow-up
+    recorded in ``tests/test_model_shelf_api.py`` and
+    ``docs/backend_architecture.md`` §16.3). The templated ``OWNER_ONLY`` GETs
+    are deliberately *not* pinned - that tier grows with ordinary feature work,
+    and a pin there would fail an unrelated route addition with a message about
+    a belt it cannot join.
 
     **``GET /adapters/{sha256}/file`` joined that set on 2026-08-15, and it is
     the sharpest member of it.** The other two serve a run listing and a preview
@@ -861,20 +899,30 @@ def test_every_untemplated_locality_get_is_on_the_read_blocked_belt():
     ``tests/test_model_shelf_api.py::test_no_share_token_can_download_a_model_file``
     proves that by mutation; this note is about the rollback, not about today.
     """
+    owner_class = (
+        AccessPolicy.OWNER_ONLY,
+        AccessPolicy.LOCAL_OWNER_ONLY,
+        AccessPolicy.LOOPBACK_OWNER_ONLY,
+    )
+    owner_class_gets = {
+        path
+        for (method, path), rp in ROUTE_POLICIES.items()
+        if method == "GET" and rp.policy in owner_class
+    }
+    untemplated = {path for path in owner_class_gets if "{" not in path}
+    assert untemplated, "the derivation found nothing - it has stopped working"
+    missing = sorted(untemplated - READ_BLOCKED_GET_PATHS)
+    assert missing == [], (
+        f"owner-class GETs off the second belt: {missing}. Add each to "
+        f"READ_BLOCKED_GET_PATHS in pixlstash/auth.py."
+    )
+
     tier = (AccessPolicy.LOCAL_OWNER_ONLY, AccessPolicy.LOOPBACK_OWNER_ONLY)
     tier_gets = {
         path
         for (method, path), rp in ROUTE_POLICIES.items()
         if method == "GET" and rp.policy in tier
     }
-    untemplated = {path for path in tier_gets if "{" not in path}
-    assert untemplated, "the derivation found nothing - it has stopped working"
-    missing = sorted(untemplated - READ_BLOCKED_GET_PATHS)
-    assert missing == [], (
-        f"locality-tier GETs off the second belt: {missing}. Add each to "
-        f"READ_BLOCKED_GET_PATHS in pixlstash/auth.py."
-    )
-
     templated_gap = sorted(path for path in tier_gets if "{" in path)
     assert templated_gap == [
         "/api/v1/adapters/{sha256}/file",

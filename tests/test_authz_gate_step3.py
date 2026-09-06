@@ -260,7 +260,7 @@ def test_local_owner_only_get_refused_at_the_gate(monkeypatch):
 
     Every untemplated locality-tier GET sits in ``READ_BLOCKED_GET_PATHS`` - a
     derivation, not a list, enforced by
-    ``tests/test_authz_host_capability_16_3.py::test_every_untemplated_locality_get_is_on_the_read_blocked_belt``
+    ``tests/test_authz_host_capability_16_3.py::test_every_untemplated_owner_class_get_is_on_the_read_blocked_belt``
     - so the
     middleware answers a share token before routing and the gate's
     ``_enforce_unscoped_owner`` on the ``LOCAL_OWNER_ONLY`` branch never runs -
