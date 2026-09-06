@@ -38,10 +38,14 @@ describe('requireAccel', () => {
       // A caller-supplied toString must never be called to describe the value.
       { toString: () => 'cpu' },
     ]) {
+      // Described the way requireAccel describes it, and for its reasons: a
+      // bare String() would call the `toString` the entry below supplies, and
+      // JSON.stringify throws on the BigInt above.
+      const shown = typeof bad === 'string' ? JSON.stringify(bad) : typeof bad;
       assert.throws(
         () => requireAccel(bad),
         /Unknown accelerator/,
-        `${String(bad)} must not be accepted as an accelerator`,
+        `${shown} must not be accepted as an accelerator`,
       );
     }
   });
