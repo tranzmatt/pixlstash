@@ -96,12 +96,43 @@ const lastFact = computed(() =>
     : "no folder is created inside your library",
 );
 
-const ungroupedCount = computed(() => {
-  const named = new Set();
-  for (const [, bucket] of grouped.value) {
-    for (const name of bucket.keys()) named.add(name);
-  }
-  return named;
+/**
+ * How many entities the commit creates or matches.
+ *
+ * The sum of the per-kind buckets, NOT a set of names across them: `grouped`
+ * has already collapsed same-named folders WITHIN a kind (two `Alice` folders
+ * are one Person), and collapsing across kinds as well made a `Alice` person
+ * and an `Alice` set count once between them. The number under "what happens
+ * when you press the button" then undercounted exactly the libraries that
+ * reuse a name at two levels, which is most of them.
+ */
+const entityCount = computed(() => {
+  let total = 0;
+  for (const [, bucket] of grouped.value) total += bucket.size;
+  return total;
+});
+
+/**
+ * The kinds this mapping actually has, named for the sentence beside the count.
+ *
+ * Read from the same `grouped` buckets the total is summed from, so a facet
+ * cannot be counted by the number and left out of the sentence - which is what
+ * happened to Tag. Only the non-empty ones: a single mapped project used to
+ * read "1 projects, sets, people and tags are created", naming three kinds that
+ * were not there and disagreeing with its own verb.
+ *
+ * Nothing mapped is the exception, and it is not a special case: "0 projects,
+ * sets, people and tags" is true of every kind at once, so all four are named.
+ */
+const entityKinds = computed(() => {
+  const present = FACET_KINDS.filter(
+    (kind) => grouped.value.get(kind.value)?.size,
+  );
+  const names = (present.length ? present : FACET_KINDS).map((kind) =>
+    (entityCount.value === 1 ? kind.label : kind.plural).toLowerCase(),
+  );
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 });
 
 async function poll(taskId) {
@@ -269,8 +300,8 @@ onUnmounted(() => {
           <span class="preview-step__fact-mark preview-step__fact-mark--yes"
             >✓</span
           >
-          {{ ungroupedCount.size }} project(s), set(s) and people are created or
-          matched
+          {{ entityCount.toLocaleString() }} {{ entityKinds }}
+          {{ entityCount === 1 ? "is" : "are" }} created or matched
         </div>
         <div class="preview-step__fact">
           <span class="preview-step__fact-mark"> - </span>

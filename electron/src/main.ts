@@ -917,6 +917,13 @@ async function startWithOverlayFallback(
  * the reason never reached the person choosing the folder. Declining puts the
  * setup screen back rather than quitting - the answer to "I will not use that
  * folder" is to choose another one.
+ *
+ * **A decline throws, and does not reload the setup page.** The window is still
+ * on `setup.html` (the failure happens inside the launch, before anything
+ * navigates), so reloading it destroyed the renderer that was awaiting this
+ * call: the message below never arrived, and every answer the person had given
+ * went with it. Throwing rejects `setup:commit` on the live page, which keeps
+ * the install step up, prints the message, and re-enables Back and Try again.
  */
 async function startFromSetup(accel: Accel | null, navigate: boolean): Promise<void> {
   try {
@@ -927,7 +934,6 @@ async function startFromSetup(accel: Accel | null, navigate: boolean): Promise<v
     // folder" is the answer, and here it is one click away.
     if (isVaultUnusable(caught)) {
       if (!(await offerVaultRecreation(caught, 'Choose Another Folder'))) {
-        await mainWindow?.loadFile(join(__dirname, 'renderer', 'setup.html'));
         throw new Error(
           'PixlStash could not open the library database in that folder. Choose another folder, or let PixlStash start a new one there.',
         );
@@ -937,7 +943,6 @@ async function startFromSetup(accel: Accel | null, navigate: boolean): Promise<v
     }
     if (!isPermissionRepairRequired(caught)) throw caught;
     if (!(await offerPermissionRepair(caught))) {
-      await mainWindow?.loadFile(join(__dirname, 'renderer', 'setup.html'));
       throw new Error(
         'PixlStash will not open a library with those permissions. Choose another folder, or allow the repair.',
       );
@@ -1359,6 +1364,7 @@ function registerIpc(): void {
               2,
             ),
           ),
+        clearConfig: () => rmSync(serverConfigPath(), { force: true }),
         parkTelemetry: writePendingTelemetry,
         parkMapping: writePendingMapping,
         setActiveAccel: (accel) => manager.setActiveAccel(accel),
@@ -1382,6 +1388,7 @@ function registerIpc(): void {
               )
             : null,
         announceReading: () => sendPhase({ phase: 'reading' }),
+        announceInstallFailed: (message) => sendPhase({ phase: 'installFailed', message }),
       });
     },
   );

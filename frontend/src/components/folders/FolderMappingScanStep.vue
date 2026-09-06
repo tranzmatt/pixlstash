@@ -7,7 +7,7 @@
  * completion. Cancelling the read is the wizard's job - it is the one that
  * knows whether there is anything else to undo.
  */
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { VProgressCircular } from "vuetify/components";
 
 import {
@@ -28,7 +28,7 @@ const props = defineProps({
   matchExisting: { type: Boolean, default: true },
 });
 
-const emit = defineEmits(["task", "ready", "cancel"]);
+const emit = defineEmits(["task", "ready", "cancel", "read-failed"]);
 
 const taskId = ref("");
 const status = ref("");
@@ -37,14 +37,48 @@ const processed = ref(0);
 const total = ref(0);
 const result = ref(null);
 const loadError = ref("");
+/**
+ * Reattach to `resumeTaskId` on the next `begin()`.
+ *
+ * False from the first retry onwards: a resumed read that failed usually failed
+ * because its task is gone (the server keeps one slot, and a restart empties
+ * it), so re-asking for the same id fails identically forever. A retry starts a
+ * new read of the same folder.
+ */
+const reattaching = ref(Boolean(props.resumeTaskId));
 
 let pollTimer = null;
 let disposed = false;
+
+// The picker above this card is disabled while the read runs, so a failed read
+// left the owner with a message and only Cancel. Tell the parent, which puts
+// the folder field back: "pick another folder, or try this one again".
+watch(loadError, (message) => emit("read-failed", Boolean(message)));
 
 const isDone = computed(() => status.value === "completed" || status.value === "cancelled");
 const isIndeterminate = computed(() => stage.value === "walking" || total.value === 0);
 const progressPercent = computed(() =>
   total.value ? Math.min(100, Math.round((processed.value / total.value) * 100)) : 0,
+);
+
+/**
+ * Folders the walk deliberately did not enter (dot-folders, and directories on
+ * the system blocklist found below the root). Ordinary, and not a warning - but
+ * counted rather than dropped, for the same reason `unreadable_folders` is: a
+ * map that omits a subtree must not present itself as the whole library.
+ */
+const skippedFolders = computed(() => {
+  const skipped = result.value?.skipped_folders;
+  return (skipped?.hidden || 0) + (skipped?.restricted || 0);
+});
+
+/**
+ * The face signal never ran (no inference engine), so no folder could come back
+ * as a Person. Without saying so, the same tree reads as "nobody lives here"
+ * depending on whether models happened to be loaded.
+ */
+const faceSignalMissing = computed(
+  () => Boolean(result.value) && result.value.face_signal_ran === false,
 );
 
 const summary = computed(() => {
@@ -95,7 +129,7 @@ async function poll() {
 async function begin() {
   loadError.value = "";
   try {
-    if (props.resumeTaskId) {
+    if (reattaching.value) {
       taskId.value = props.resumeTaskId;
     } else {
       const started = await startFolderStructureRead(props.path, {
@@ -115,6 +149,20 @@ function proceed() {
   emit("ready", { taskId: taskId.value, result: result.value });
 }
 
+/** Read the same folder again, from scratch. */
+function retry() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = null;
+  reattaching.value = false;
+  taskId.value = "";
+  status.value = "";
+  stage.value = "";
+  processed.value = 0;
+  total.value = 0;
+  result.value = null;
+  begin();
+}
+
 onMounted(begin);
 onUnmounted(() => {
   disposed = true;
@@ -127,14 +175,23 @@ onUnmounted(() => {
     <p v-if="loadError" class="scan-step__error" role="alert">{{ loadError }}</p>
 
     <FolderMappingCard
-      :title="isDone ? 'What it found' : 'Working out what your folders mean'"
+      :title="
+        loadError
+          ? 'The read stopped'
+          : isDone
+            ? 'What it found'
+            : 'Working out what your folders mean'
+      "
       :lead="
-        isDone
+        isDone || loadError
           ? ''
           : 'Reading up to 20 pictures from each folder: who is in them, which have caption files beside them, which names repeat.'
       "
+      :warn="Boolean(loadError)"
     >
-      <template v-if="!isDone">
+      <!-- A bar still moving under a message saying the read stopped is the
+           screen contradicting itself. -->
+      <template v-if="!isDone && !loadError">
         <div class="scan-step__bar">
           <VProgressCircular
             v-if="isIndeterminate"
@@ -167,6 +224,14 @@ onUnmounted(() => {
             <div class="scan-step__stat-value">{{ result.unreadable_folders }}</div>
             <div class="scan-step__stat-label">folder(s) could not be read</div>
           </div>
+          <!-- Not a warning: skipping a vault's own caches is the walk working.
+               Shown because a map that leaves a subtree out must say so. -->
+          <div v-if="skippedFolders" class="scan-step__stat">
+            <div class="scan-step__stat-value">{{ skippedFolders.toLocaleString() }}</div>
+            <div class="scan-step__stat-label">
+              hidden or system folder(s) left out on purpose
+            </div>
+          </div>
         </div>
         <ul v-if="summary" class="scan-step__summary">
         <li v-if="summary.tallies.person">✓ {{ summary.tallies.person }} folder(s) read as Person</li>
@@ -179,13 +244,25 @@ onUnmounted(() => {
           <li v-if="summary.silent" class="scan-step__summary-muted">
             - {{ summary.silent }} with nothing to say
           </li>
+          <!-- Why there are no People, when there might well be. -->
+          <li v-if="faceSignalMissing" class="scan-step__summary-muted">
+            - no folder could be read as a Person: the face signal did not run
+            on this machine
+          </li>
         </ul>
       </template>
 
       <template #actions>
+        <!-- A failed read replaces the button it can never enable. Without
+             this the card offered a permanently disabled "Set up my library"
+             and Cancel, and the folder field above was disabled too. -->
+        <AppButton v-if="loadError" variant="primary" @click="retry">
+          Try again
+        </AppButton>
         <AppButton
+          v-else
           variant="primary"
-          :loading="!isDone && !loadError"
+          :loading="!isDone"
           :disabled="!isDone"
           @click="proceed"
         >
