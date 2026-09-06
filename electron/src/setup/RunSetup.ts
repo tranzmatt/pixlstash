@@ -107,7 +107,7 @@ export async function runFirstRunSetup<Accel>(
   deps.writeConfig(imageRoot);
 
   try {
-    await install(imageRoot, choices, deps);
+    await afterConfig(imageRoot, choices, deps);
   } catch (error) {
     // Everything above this point refuses BEFORE writing a config, and every
     // refusal below has already written one. A config is what tells the next
@@ -120,8 +120,8 @@ export async function runFirstRunSetup<Accel>(
   }
 }
 
-/** Everything a written config has to be rolled back for. */
-async function install<Accel>(
+/** Everything after the config is written, and everything it is rolled back for. */
+async function afterConfig<Accel>(
   imageRoot: string,
   choices: SetupChoices,
   deps: SetupDeps<Accel>,
