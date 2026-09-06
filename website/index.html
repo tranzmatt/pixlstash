@@ -7,7 +7,7 @@
     <title>PixlStash | Image Library for Creators</title>
     <meta
       name="description"
-      content="PixlStash is a local image library for photographers and AI creators with full undo and redo, duplicate review, search, tagging, and dataset exports."
+      content="PixlStash is a local image library for photographers and AI creators. CLIP semantic search, face recognition, automatic tagging and captioning, quality and anomaly scoring, a label review queue, and two-way ComfyUI integration, all running on your own hardware."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -477,6 +477,36 @@
         background: rgba(255, 255, 255, 1);
       }
     </style>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "PixlStash",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Windows, macOS, Linux",
+        "url": "https://pixlstash.dev/",
+        "downloadUrl": "https://pixlstash.dev/install.html",
+        "description": "A local picture library server for organizing, filtering and reviewing large image collections, with its AI running on your own hardware.",
+        "featureList": [
+          "CLIP semantic text search across the whole library (OpenCLIP ViT-B-32)",
+          "Face detection and face recognition (InsightFace SCRFD-10G, buffalo_l or AuraFace)",
+          "Automatic face grouping into named characters",
+          "Reverse face search and reverse likeness search",
+          "Automatic tagging with selectable engines (WD14, Florence-2, JoyCaption)",
+          "Image captions and descriptions",
+          "Object segmentation",
+          "Tag review queue and tag health board",
+          "Duplicate detection with a tiered review queue",
+          "Smart score and calibrated anomaly detection",
+          "Character likeness scoring",
+          "Dataset export and ai-toolkit run tracking",
+          "Two-way ComfyUI integration",
+          "Tagger plugin API",
+          "NVIDIA CUDA, experimental AMD ROCm, or CPU inference",
+          "All inference runs locally, no cloud API"
+        ]
+      }
+    </script>
   </head>
   <body>
     <div class="shell">
@@ -486,14 +516,16 @@
       <div class="page-hero">
         <h1>A desktop image manager for creators</h1>
         <p>
-          Organize and search thousands of images by content or face, all on
-          your own machine.<br />Easy install with no server to set up... unless
-          you want to!
+          Search thousands of images by content or face, tag and score them,
+          check what the models got wrong, and send the good ones on. Every
+          model runs on your own machine.<br />Easy install with no server to
+          set up... unless you want to!
         </p>
 
         <div class="hero-badges">
           <span class="badge">Simple install</span>
           <span class="badge">Runs locally</span>
+          <span class="badge">On-device AI, no cloud API</span>
           <span class="badge">Headless server option</span>
           <span class="badge">Supports NVIDIA and AMD GPUs</span>
           <span class="badge">ComfyUI nodes</span>
@@ -547,6 +579,32 @@
           <div class="video-card">
             <video
               src="assets/VideoMain.mp4"
+              autoplay
+              loop
+              muted
+              playsinline
+            ></video>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="feature-text">
+            <span class="feature-number">The AI</span>
+            <h2>Models that do the work, not just the finding</h2>
+            <p>
+              Semantic search and face recognition are the start. PixlStash also
+              tags and captions with the engine you pick, scores for quality and
+              malformed anatomy, and gives you a review queue for the labels it
+              is least sure about.
+            </p>
+            <p>
+              All of it runs on your own hardware, CPU or GPU. There is no cloud
+              API and no account to sign into.
+            </p>
+            <p><a href="ai.html">See all the AI features →</a></p>
+          </div>
+          <div class="video-card">
+            <video
+              src="assets/05-SemanticSearch.mp4"
               autoplay
               loop
               muted
@@ -617,15 +675,31 @@
             images through generation tools. Yes, it can also work as a home
             server.
           </p>
-          <p class="immich-lead">With PixlStash you get:</p>
+          <p class="immich-body">
+            <strong
+              >It does both of the AI features Immich is known for.</strong
+            >
+            CLIP semantic search, face detection and recognition, and duplicate
+            detection are all here too. Immich has OCR and mobile apps with
+            background sync, which PixlStash does not.
+          </p>
+          <p class="immich-lead">On top of those, with PixlStash you get:</p>
           <ul class="immich-list">
             <li>
-              A tag review queue, so auto-tags are verified before they're
-              trusted.
+              Automatic tagging and captioning, with the engine selectable per
+              request: WD14, Florence-2 or JoyCaption.
             </li>
             <li>
-              Segmentation, selectable taggers, and a choice of GPU or CPU
-              backend.
+              A tag review queue and a tag health board, so auto-tags are
+              verified before they're trusted.
+            </li>
+            <li>
+              Quality, anomaly and character-likeness scoring, so a large set
+              sorts by what is worth looking at.
+            </li>
+            <li>
+              Segmentation, reverse face search, reverse likeness search, and a
+              choice of GPU or CPU backend.
             </li>
             <li>
               Two-way ComfyUI integration: control ComfyUI from PixlStash, or
@@ -637,8 +711,13 @@
             <li>
               <a
                 style="color: var(--accent-2); text-decoration: underline"
+                href="ai.html"
+                >Every AI feature, side by side with Immich's</a
+              >, and
+              <a
+                style="color: var(--accent-2); text-decoration: underline"
                 href="features.html"
-                >And a whole host of other work features</a
+                >a whole host of other work features</a
               >
             </li>
           </ul>
