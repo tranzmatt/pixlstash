@@ -25,7 +25,7 @@ from pixlstash.services import (
     views_service,
 )
 from pixlstash.telemetry import mark_install_established
-from pixlstash.utils.atomic_write import write_json_atomic
+from pixlstash.server_config_io import persist_server_config
 from pixlstash.utils.quality.smart_score_utils import smart_score_penalised_tags
 from pixlstash.utils.service.smart_score_invalidation import (
     changed_penalised_tags,
@@ -986,7 +986,7 @@ def create_router(server) -> APIRouter:
         server.vault.set_daily_snapshots_enabled(body.daily_snapshots)
         config_path = getattr(server, "_server_config_path", None)
         if config_path:
-            write_json_atomic(config_path, server._server_config)
+            persist_server_config(config_path, server._server_config)
         return {"status": "success", "daily_snapshots": body.daily_snapshots}
 
     def _scrapheap_retention_payload() -> dict:
@@ -1089,7 +1089,7 @@ def create_router(server) -> APIRouter:
         server.vault.set_scrapheap_retention(effective_days, reduced_at)
         config_path = getattr(server, "_server_config_path", None)
         if config_path:
-            write_json_atomic(config_path, server._server_config)
+            persist_server_config(config_path, server._server_config)
         return _scrapheap_retention_payload()
 
     @router.get(
@@ -1220,7 +1220,15 @@ def create_router(server) -> APIRouter:
             "Mode. Sending `views_root: null` removes the published tree and "
             "leaves the folder itself alone."
         ),
-        responses={400: {"description": "The views folder cannot hold the tree."}},
+        responses={
+            400: {"description": "The views folder cannot hold the tree."},
+            403: {
+                "description": (
+                    "The views folder is outside every configured "
+                    "`filesystem_roots` entry."
+                )
+            },
+        },
     )
     def patch_views_config(request: Request, body: ViewsConfigPatch):
         _ensure_secure_when_required(request)
@@ -1237,6 +1245,34 @@ def create_router(server) -> APIRouter:
                 views_service.remove(previous_root)
             library_settings_service.set_views_config(server.vault.db, None, [])
             return _views_payload()
+
+        # An operator who confined the folder picker to a set of roots did not
+        # mean "except for the route that creates a tree of links". Honoured
+        # here rather than in `check_views_root`, which is a pure path rule and
+        # has no server config to read.
+        roots = [
+            os.path.realpath(root)
+            for root in (server._server_config.get("filesystem_roots") or [])
+            if isinstance(root, str) and root
+        ]
+        # Only a path the sink would itself accept is compared. `~` is NOT
+        # expanded and a relative value is skipped rather than resolved:
+        # `os.path.realpath("")` is the server's working directory, which could
+        # sit inside a configured root and pass a check it was never meant to.
+        # Both shapes are refused downstream by `check_views_root`, which is the
+        # one place that decides what a views root may be.
+        candidate = body.views_root.strip()
+        if roots and os.path.isabs(candidate):
+            resolved_views_root = os.path.realpath(candidate)
+            if not any(
+                resolved_views_root == root
+                or resolved_views_root.startswith(root + os.sep)
+                for root in roots
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Path is not within any configured filesystem root.",
+                )
 
         if previous_root and views_service.roots_overlap(
             previous_root, body.views_root

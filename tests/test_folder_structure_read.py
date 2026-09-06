@@ -694,7 +694,8 @@ def test_a_relative_path_is_refused_before_anything_is_walked(owner_env):
 def test_an_unknown_task_id_is_a_404_on_status_and_cancel(owner_env):
     owner = owner_env["owner"]
     assert owner.get(_STATUS, params={"task_id": "nope"}).status_code == 404
-    assert owner.delete(_READ, params={"task_id": "nope"}).status_code == 404
+    cancel_response = owner.delete(_READ, params={"task_id": "nope"})
+    assert cancel_response.status_code == 404
 
 
 def test_a_read_completes_and_reports_its_result(owner_env):
@@ -785,7 +786,8 @@ def test_a_share_token_is_refused_on_all_three_routes(owner_env):
     root = owner_env["tmp"]
     assert anon.post(_READ, json={"path": root}, headers=share).status_code == 403
     assert anon.get(_STATUS, params={"task_id": "x"}, headers=share).status_code == 403
-    assert anon.delete(_READ, params={"task_id": "x"}, headers=share).status_code == 403
+    delete_resp = anon.delete(_READ, params={"task_id": "x"}, headers=share)
+    assert delete_resp.status_code == 403
 
 
 # ===========================================================================
