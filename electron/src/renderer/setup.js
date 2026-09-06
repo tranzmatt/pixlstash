@@ -131,9 +131,14 @@ let privacyChoice = null;
 // True once the runtime install has reported anything, which is also when the
 // backend is already up reading the library behind it.
 let reading = false;
-// A commit that came back with an error. The install step keeps it on screen
+// A step that came back with an error. The install step keeps it on screen
 // rather than dropping the user at the first question with nothing to read.
 let failed = false;
+// What the "Try again" button retries. A commit failure retries the commit; a
+// probe that never answered retries the probe, because there are no answers to
+// commit yet. Never null while `failed` is true - a screen that says something
+// went wrong and offers nothing to press is the bug this exists to prevent.
+let retry = commit;
 
 function show(el) {
   el.classList.remove('hidden');
@@ -142,8 +147,31 @@ function hide(el) {
   el.classList.add('hidden');
 }
 function showError(msg) {
-  els.error.textContent = msg;
+  // Shown BEFORE the text goes in: `.hidden` is `display: none`, so a live
+  // region filled while it is still hidden is filled outside the accessibility
+  // tree and announces nothing.
   show(els.error);
+  els.error.textContent = msg;
+}
+
+/**
+ * The one shape every failure on this screen takes.
+ *
+ * A message the person can read, one line saying which part stopped, and a live
+ * "Try again" that retries THAT part. Written once because it was written
+ * twice-and-a-half and one of the copies (the probe's) left the install step
+ * with both controls hidden and nothing to do.
+ */
+function fail(message, { line, hint, retryWith }) {
+  busy = false;
+  failed = true;
+  retry = retryWith;
+  lines = [{ id: 'failed', name: line, note: '', value: '', state: 'todo', fraction: -1 }];
+  renderLines();
+  showError(message);
+  render();
+  els.next.disabled = false;
+  els.hint.textContent = hint;
 }
 
 /** Human-readable bytes, in the units a person reads a disk in. */
@@ -661,23 +689,11 @@ async function commit() {
     // question hid the message on a screen that was no longer shown, which is
     // how "the backend refuses this folder's permissions" reached the user as
     // an unexplained trip back to the beginning.
-    busy = false;
-    failed = true;
-    els.next.disabled = false;
-    lines = [
-      {
-        id: 'failed',
-        name: 'Setup could not finish',
-        note: '',
-        value: '',
-        state: 'todo',
-        fraction: -1,
-      },
-    ];
-    renderLines();
-    showError((e && e.message) || String(e));
-    render();
-    els.hint.textContent = 'Change an answer, or try again.';
+    fail((e && e.message) || String(e), {
+      line: 'Setup could not finish',
+      hint: 'Change an answer, or try again.',
+      retryWith: commit,
+    });
   }
 }
 
@@ -707,6 +723,7 @@ els.back.addEventListener('click', () => {
   if (busy) return;
   hide(els.error);
   failed = false;
+  retry = commit;
   lines = [];
   renderLines();
   go(at - 1);
@@ -714,7 +731,8 @@ els.back.addEventListener('click', () => {
 
 els.next.addEventListener('click', () => {
   if (busy || els.next.disabled) return;
-  if (failed || at >= steps.length - 2) commit();
+  if (failed) retry();
+  else if (at >= steps.length - 2) commit();
   else go(at + 1);
 });
 
@@ -779,6 +797,13 @@ api.onPhase((p) => {
     } else {
       setLine('server', { name: 'Starting PixlStash', state: 'running' });
     }
+  } else if (p.phase === 'installFailed' && p.message) {
+    // The download is over and the read is not: setup will not settle until the
+    // read finishes, which on a big library is minutes. Stop the runtime bar and
+    // say why NOW rather than letting it draw a download that already failed;
+    // the controls come back with the rejection, as for any other failure.
+    setLine('runtime', { state: 'todo', note: '', value: 'Failed', fraction: -1 });
+    showError(String(p.message));
   } else if (p.phase === 'error' && p.message) {
     showError(String(p.message));
   }
@@ -827,9 +852,41 @@ setInterval(() => {
   dots.forEach((el, i) => el.classList.toggle('is-on', i === slide));
 }, 4000);
 
-init().catch((e) => {
+/**
+ * The probe never answered, so there are no questions to ask and no answers to
+ * commit - only the one step that can hold a message. Retrying the probe is the
+ * only move there is, so it is the one the button makes: without it this landed
+ * on the install step with Back and Continue both hidden, an error to read and
+ * nothing at all to press.
+ */
+function probeFailed(e) {
   steps = ['install'];
   at = 0;
+  fail((e && e.message) || String(e), {
+    line: 'PixlStash could not work out what to ask you',
+    hint: 'Try again, or quit PixlStash and reopen it.',
+    retryWith: retryProbe,
+  });
+}
+
+function retryProbe() {
+  hide(els.error);
+  failed = false;
+  retry = commit;
+  lines = [
+    { id: 'probe', name: 'Asking PixlStash what it needs', state: 'running', note: '', value: '', fraction: -1 },
+  ];
+  renderLines();
+  // Nothing is pressable while the probe is out; `init` renders the real
+  // questions when it answers, and `probeFailed` puts the controls back.
+  busy = true;
   render();
-  showError((e && e.message) || String(e));
-});
+  init()
+    .then(() => {
+      busy = false;
+      render();
+    })
+    .catch(probeFailed);
+}
+
+init().catch(probeFailed);

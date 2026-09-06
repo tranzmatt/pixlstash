@@ -3479,7 +3479,7 @@ Exact:    /, /login, /logout, /check-session, /version,
 Prefix:   /assets/, /share/, /docs/
 ```
 
-In addition, every scoped token (any token for which `request.state.token_scope` is populated — i.e. any scope but `ALL`) is blocked from a `READ_BLOCKED_GET_PATHS` set covering user config and filesystem browsing, and blocked from non-GET methods (except a small `READ_SAFE_POST_PATHS` allowlist) **unless its scope is named in `auth.WRITE_ENABLED_SCOPES`**. That set is the fail-closed hinge (issue #962): the check used to key on `scope == "READ"`, so any other string — a misconfigured row, a forged one, a scope added later — skipped the write refusal and reached every `*_SCOPED` mutation route, each of which is write-unreachable solely because of it. Write-ness is now granted by declaration, not by omission. `WRITE` is the one member and has no mint path; `create_token` still allowlists `ALL`/`READ`.
+In addition, every scoped token (any token for which `request.state.token_scope` is populated — i.e. any scope but `ALL`) is blocked from the `READ_BLOCKED_GET_PATHS` set — every untemplated GET the registry declares `owner_only`/`local_owner_only`/`loopback_owner_only`, derived rather than curated (§16.3) — and blocked from non-GET methods (except a small `READ_SAFE_POST_PATHS` allowlist) **unless its scope is named in `auth.WRITE_ENABLED_SCOPES`**. That set is the fail-closed hinge (issue #962): the check used to key on `scope == "READ"`, so any other string — a misconfigured row, a forged one, a scope added later — skipped the write refusal and reached every `*_SCOPED` mutation route, each of which is write-unreachable solely because of it. Write-ness is now granted by declaration, not by omission. `WRITE` is the one member and has no mint path; `create_token` still allowlists `ALL`/`READ`.
 
 **Sessions and the credentials that may create one.** `active_session_ids` maps a `session_id` cookie to a user id. Password and desktop sessions carry no library pin and follow a switch. A token-derived session additionally records the minting token's immutable `library_uuid` in `_library_uuid_by_session`; the central gate enforces it on every library-bound request, so exchanging a token for a cookie cannot launder away its pin. Three other rules govern sessions, all enforced in `auth.py`:
 
@@ -3570,7 +3570,7 @@ The one accepted cost is rot in the other direction: if a listed route's module 
 **Why this is accepted today (single-owner).** The exposure is bounded to effectively nil in the current single-owner product:
 
 - `READ`-scope tokens — the only tokens the share UI mints for non-owners — are **fully blocked** from this class: writes are rejected by the middleware, `detect-sidecars` and `filesystem/browse` are in `READ_BLOCKED_GET_PATHS`, and the list endpoints return empty for any scoped token.
-  - **That membership is now a machine fact, not a remembered step (#831).** The middleware's non-GET rule says nothing about a GET, so `READ_BLOCKED_GET_PATHS` was the only pre-routing refusal on the tier's two GETs — and it was hand-maintained with nothing tying it to `ROUTE_POLICIES`. The requirement is now derived from the registry in both directions: `tests/test_authz_host_capability_16_3.py::test_every_untemplated_locality_get_is_on_the_read_blocked_belt` fails the build on a GET declared `local_owner_only`/`loopback_owner_only` without its entry (and pins the templated paths, which an exact-match frozenset cannot express, as a known gap), and `tests/test_architecture_guardrails.py::test_read_blocked_get_paths_name_declared_owner_class_gets` fails it on an entry naming no declared owner-class GET. The gate's own `_enforce_unscoped_owner` is the live enforcement for the tier and is pinned separately by `tests/test_authz_gate_step3.py::test_local_owner_only_get_refused_at_the_gate`, which empties the frozenset so the token actually reaches the gate. The frozenset is kept rather than deleted in favour of the single chokepoint because it is the layer that survives an `AUTHZ_GATE_ENFORCING = False` rollback.
+  - **That membership is now a machine fact, not a remembered step (#831).** The middleware's non-GET rule says nothing about a GET, so `READ_BLOCKED_GET_PATHS` was the only pre-routing refusal on the tier's two GETs — and it was hand-maintained with nothing tying it to `ROUTE_POLICIES`. The requirement is now derived from the registry in both directions: `tests/test_authz_host_capability_16_3.py::test_every_untemplated_owner_class_get_is_on_the_read_blocked_belt` fails the build on any untemplated GET declared `owner_only`/`local_owner_only`/`loopback_owner_only` without its entry (and pins the templated locality paths, which an exact-match frozenset cannot express, as a known gap). **The derivation covers the whole owner class as of #1177 item 11**, not just the locality tier: `GET /insights` (the absolute folder path behind every finding) and `GET /moves/pending` (`old_path`/`new_path` for every externally-moved file) are `owner_only`, served host paths, and sat off the belt precisely because the derivation had been scoped to the tier that *exercises* host authority rather than the class that may *disclose* it. Membership is now owed by tier, not by grading a payload, and `tests/test_architecture_guardrails.py::test_read_blocked_get_paths_name_declared_owner_class_gets` fails it on an entry naming no declared owner-class GET. The gate's own `_enforce_unscoped_owner` is the live enforcement for the tier and is pinned separately by `tests/test_authz_gate_step3.py::test_local_owner_only_get_refused_at_the_gate`, which empties the frozenset so the token actually reaches the gate. The frozenset is kept rather than deleted in favour of the single chokepoint because it is the layer that survives an `AUTHZ_GATE_ENFORCING = False` rollback.
 - `ALL`-scope tokens can only be minted by the owner (`create_token` refuses scoped callers, `auth.py:900`) and are necessarily unrestricted (an `ALL`+`resource_type` token can no longer be minted or used — see §16.2 item 4), and `require_local_for_write` (default on) blocks `ALL` tokens from non-local IPs. So a remote caller is blocked and the only `ALL`-token holder is the owner / the owner's own devices: `ALL == owner == operator` holds, and giving the operator filesystem access grants nothing they don't already have on their own box.
 - The path/write operations are further constrained by the system-directory blocklist ([`reference_folder_validator.py`](../pixlstash/utils/reference_folder_validator.py)) and sidecar-suffix validation (`reference_folders.py:_validate_sidecar_suffix`).
 
@@ -3633,7 +3633,7 @@ The authz refactor (§16.2) moved this class off `require_user_id` and onto decl
 
     **Two disclosures these review rounds surfaced are deliberately NOT fixed here, and neither is this change's doing.** First, a picture-scoped token reads absolute host paths out of the picture row itself — `import_source_folder` and `tags_file` are documented columns (`pixlstash/db_models/picture.py`), served by `GET /pictures/{id}/{field}`, `GET /pictures/search`, `GET /stacks/{id}/pictures` and `GET /picture_sets/{id}`. That is a per-object disclosure behind a membership check, not a global one behind none, and deciding what a share viewer may see of a picture's provenance is a product call rather than a bug fix. Second, `GET /api/v1/network/info` (`any_token`) returns the server's LAN IP. Both predate #326 and both want their own issue; the regression test's comment is scoped to what it actually checks so that neither is implied to be closed. Pinned by `tests/test_authz_host_capability_16_3.py::test_host_capability_tier_split_is_27_local_5_loopback` and by `test_tagger_diagnostics_is_local_and_the_any_token_routes_carry_no_host_path`. That test does two things a hand-written check would not: it greps each serialised body for the owner's **home directory** rather than checking a field name is absent (the weaker assertion passed while `load_error` still carried the folder, and an assertion anchored on the plugin folder would pass any leak one directory over), and it **derives** the routes to probe from `ROUTE_POLICIES` — every parameterless `GET` declared `any_token` or `public` — rather than naming them, because a written-down list is exactly what let two review rounds each miss a sibling. It runs them as the stated threat: a resource-scoped share token.
 
-    **Both tagger routes are also on the second belt**, `READ_BLOCKED_GET_PATHS` in `pixlstash/auth.py` — the middleware list that refuses a READ token a GET outright, where `GET /filesystem/browse` already sits. The gate alone is enough while it is enforcing, and that is the point: `AUTHZ_GATE_ENFORCING = False` is a documented one-line rollback, and with the gate off the diagnostics route served the owner's home directory to a share token. The review reproduced exactly that. `tests/test_authz_host_capability_16_3.py::test_the_plugin_routes_survive_the_documented_gate_rollback` turns the gate off deliberately and asserts both routes stay 403 for a share token while the owner still reaches them. The membership is **derived** rather than written down — `test_every_untemplated_locality_get_is_on_the_read_blocked_belt` asserts that every untemplated locality-tier GET is on the belt, so the next one fails the build instead of waiting for a review. Running that derivation for the first time found `GET /api/v1/model-moves` off it, which is fixed here: it serves the move queue's source and destination folders, so the rollback handed those to a READ token. `GET /pictures/plugins` is deliberately **not** on the belt: it is `owner_only` at the gate for the third-party text it serves, but `ImagePluginManager.list_plugins()` returns `plugin_schema()` and nothing else — no host path, no user settings — so it is not what this list is for. **The `author` header (#961) is the one identifying string in that payload**: it is a literal from a shipped or user-dropped class body, not derived from the host, and the route's existing `OWNER_ONLY` policy already keeps it away from a share token. It is on this route's ledger deliberately — a plugin list whose whole job is saying who wrote a plugin cannot also promise to name nobody. **What stays open** is the templated half: the frozenset matches literal paths, so `GET /model-folders/{folder_id}/runs` and its `samples/{filename}` sibling cannot join it at all. They are pinned as a known pair by the same test (a third fails it), and closing the gap needs prefix matching rather than another frozenset line. The follow-up is recorded in `tests/test_model_shelf_api.py`. Arithmetic, not judgement.
+    **Both tagger routes are also on the second belt**, `READ_BLOCKED_GET_PATHS` in `pixlstash/auth.py` — the middleware list that refuses a READ token a GET outright, where `GET /filesystem/browse` already sits. The gate alone is enough while it is enforcing, and that is the point: `AUTHZ_GATE_ENFORCING = False` is a documented one-line rollback, and with the gate off the diagnostics route served the owner's home directory to a share token. The review reproduced exactly that. `tests/test_authz_host_capability_16_3.py::test_owner_only_path_disclosing_gets_survive_the_documented_gate_rollback` turns the gate off deliberately and asserts both routes stay 403 for a share token while the owner still reaches them. The membership is **derived** rather than written down — `test_every_untemplated_owner_class_get_is_on_the_read_blocked_belt` asserts that every untemplated owner-class GET is on the belt, so the next one fails the build instead of waiting for a review. Running that derivation for the first time found `GET /api/v1/model-moves` off it, which is fixed here: it serves the move queue's source and destination folders, so the rollback handed those to a READ token. `GET /pictures/plugins` was deliberately **off** the belt on this reasoning: it is `owner_only` at the gate for the third-party text it serves, but `ImagePluginManager.list_plugins()` returns `plugin_schema()` and nothing else — no host path, no user settings — so it was not what this list was for. **#1177 item 11 put it on**, along with every other untemplated owner-class GET: the belt's membership question stopped being "is this payload sensitive?" and became "is this route owner-only?", which is the only version of it a derivation can answer. **The `author` header (#961) is the one identifying string in that payload**: it is a literal from a shipped or user-dropped class body, not derived from the host, and the route's existing `OWNER_ONLY` policy already keeps it away from a share token. It is on this route's ledger deliberately — a plugin list whose whole job is saying who wrote a plugin cannot also promise to name nobody. **What stays open** is the templated half: the frozenset matches literal paths, so `GET /model-folders/{folder_id}/runs` and its `samples/{filename}` sibling cannot join it at all. They are pinned as a known pair by the same test (a third fails it), and closing the gap needs prefix matching rather than another frozenset line. The follow-up is recorded in `tests/test_model_shelf_api.py`. Arithmetic, not judgement.
 
   - **Updated 2026-08-15 (the ComfyUI adapter loader's server half) — the locality total is now `33 = 28 local + 5 loopback`.** `GET /api/v1/adapters/{sha256}/file` streams one registered adapter's bytes, so a generator on another machine can *use* what this one catalogues. Without it the interop story stops at metadata: `GET /adapters` serves `locations[].folder_path` and `relpath`, but those are **this** host's paths and name nothing on the machine that asked, so a ComfyUI elsewhere on the network could see every LoRA and load none of them.
 
@@ -3643,7 +3643,7 @@ The authz refactor (§16.2) moved this class off `require_user_id` and onto decl
 
     Three narrowings inside the handler, none of them the authz tier: only a `present` copy is served (`missing` says the scan looked and found nothing, `unreachable` says the drive is unplugged, and a forgotten folder leaves its rows **tombstoned rather than deleted** — so serving on any other state would hand out bytes from a folder the owner un-registered); a checkpoint hash is refused with the same 404 as the detail route beside it; and the join is contained with `path_is_within` even though neither half is caller-supplied, because on *this* route a `..` from a faulty scan or a restored hub would be an arbitrary-file reader rather than a wrong row — the same argument B7 makes for containing its writes. The containment is lexical first for the reason `path_is_within` documents: a model symlinked into a models directory is ordinary practice, and realpath-only containment refuses every one of them. A known hash with no readable copy is **409, not 404**, because "no such adapter" and "the file is not here right now" call for different behaviour from the caller. The digest is deliberately not re-verified on the way out: that reads every byte twice per request, and the caller addressed the file by the hash it can check itself. Both directions and both halves of the tier are pinned in `tests/test_model_shelf_api.py`; the share-token direction is asserted rather than reasoned about, because this is a **GET** and the `test_share_tokens_never_reach_a_folder_mutator` docstring warns in as many words that a GET on this tier is refused by the gate alone. Arithmetic, not judgement.
 
-    **It is the third member of the templated `READ_BLOCKED_GET_PATHS` gap, and the sharpest.** The belt matches literal paths, so no templated locality GET can be on it; the two already there serve a run listing and a preview image, and this one streams model weights. Under the documented `AUTHZ_GATE_ENFORCING = False` rollback a share token would therefore not read a directory but download every adapter on the shelf. It is recorded rather than closed here because closing it means prefix matching in a belt every request passes through — its own change with its own review — and a bespoke `startswith` for one route is the special case that rots. The gate refuses it today, proved by mutation in `tests/test_model_shelf_api.py::test_no_share_token_can_download_a_model_file`; `tests/test_authz_host_capability_16_3.py::test_every_untemplated_locality_get_is_on_the_read_blocked_belt` fails the build if a fourth is added without this decision being made again.
+    **It is the third member of the templated `READ_BLOCKED_GET_PATHS` gap, and the sharpest.** The belt matches literal paths, so no templated locality GET can be on it; the two already there serve a run listing and a preview image, and this one streams model weights. Under the documented `AUTHZ_GATE_ENFORCING = False` rollback a share token would therefore not read a directory but download every adapter on the shelf. It is recorded rather than closed here because closing it means prefix matching in a belt every request passes through — its own change with its own review — and a bespoke `startswith` for one route is the special case that rots. The gate refuses it today, proved by mutation in `tests/test_model_shelf_api.py::test_no_share_token_can_download_a_model_file`; `tests/test_authz_host_capability_16_3.py::test_every_untemplated_owner_class_get_is_on_the_read_blocked_belt` fails the build if a fourth is added without this decision being made again.
 
   - **Updated 2026-08-16 (#933, `Delete from disk`) — the locality total is now `34 = 29 local + 5 loopback`.** `POST /api/v1/model-files/delete` removes every registered copy of the named models — to the OS trash by default, permanently on request — and then drops their hub rows. It is the **unlink half of `POST /model-moves` standing alone**, without the copy that justifies it, and it is the first route on this tier for *destruction* alone. It takes **no host path**: the body is a list of hub `model.id`, and every path it touches is contained against the folder the scanner recorded, so a row that escapes its folder is refused rather than unlinked. The containment is `_contained_path` rather than the mover's `resolve_path_within`, and deliberately: that one returns a `realpath`, so on a symlinked model it would delete the bytes the link points at and leave the link. This contains the file lexically and `realpath`s the *directory* holding it, so a `..` cannot escape, a symlinked directory component cannot redirect the unlink, and what is removed is the name the shelf catalogues. Two narrowings inside the handler are not the authz tier and are worth reading beside it: only `user` and `managed` folders are eligible, so PixlStash's own engine roots, the InsightFace packs and the shared HuggingFace cache are refused whole; and a model with an `unreachable` copy is refused, because an unplugged drive is not a deletion. Pinned by `tests/test_authz_host_capability_16_3.py::test_host_capability_tier_split_is_29_local_5_loopback`. Arithmetic, not judgement.
 
@@ -4060,6 +4060,43 @@ and updates `file_path` on the existing row instead.
   `maintenance.py` looks for every one, and `remove_thumbnail` deletes at every
   location a picture's bitmap could be. `is_pixlstash_thumbnail` keeps excluding
   the old siblings from every walk until they have all moved.
+- **The library's own root is scanned by the same task, under `folder_id=None`.**
+  A laid-out root is a folder tree the owner reorganises in their file manager,
+  and until this scan existed a rename there was a row `MissingFilePurgeFinder`
+  deleted within the hour. `ReferenceFolderScanFinder` keeps the root's schedule
+  itself (no `ReferenceFolder` row to stamp): due at boot, then every
+  `_RESCAN_INTERVAL_S`, and immediately when `ReferenceFolderWatcher` — which
+  watches `image_root` under the id `None` — reports a change. Root mode differs
+  from a reference folder exactly where `layout_move_service.LayoutRoot` says it
+  does: pictures are the `reference_folder_id IS NULL` rows, `file_path` is
+  written root-relative (`_stored`), the layout comes from `LibrarySettings`,
+  and there is no status, sidecar sync or suffix detection. The walk prunes
+  dot-directories and `_ROOT_INTERNAL_DIRS` (`snapshots`, `tmp`), the same set
+  `folder_structure_commit_service.LIBRARY_OWN_FOLDERS` refuses to import. A file
+  younger than `_ROOT_SETTLE_S` is on disk but neither new nor removed: PixlStash's
+  own imports write the file before the row, so a young file belongs to whoever
+  is writing it, and a removal seen alongside young files is deferred a scan so
+  a copy-then-delete can still be paired. A rename keeps the mtime and is
+  followed at once. Both the scan and the local-import commit also re-check the
+  path inside their insert transaction, the one place their check-then-insert
+  cannot interleave, so whichever lands first owns the row.
+  Removals are only ever believed for a subtree the walk actually read: a
+  directory it could not list, a directory symlink it would not follow, a pruned
+  folder and another reference folder's root all go into `unscanned_roots`, and
+  rows beneath any of them are kept. A pass that finds no files at all while rows
+  exist deletes nothing — an unmounted drive is an empty directory, and
+  `Vault.__init__` will have recreated the mount point. `delete_removed` then
+  consults the `PictureMove` journal through
+  `MissingFilePurgeTask._separate_our_own_moves` before it deletes anything, so a
+  scan overlapping the move engine's rename-then-repoint window repoints the row
+  instead of destroying it.
+  `MissingFilePurgeFinder` leaves the root's rows to the scan entirely: it takes
+  `is_ready=ReferenceFolderScanFinder.root_scan_complete` so it queues nothing
+  before the first root scan, and its sweep then skips `reference_folder_id IS
+  NULL` rows for good. The gate used to lift once that first scan finished, which
+  put two deleters on the same rows — the hourly sweep pairs renames from the
+  journal alone, so a rename the scan had deliberately deferred was purged before
+  the next scan could follow it. Exactly one of the two may delete a root row.
 - **A followed move carries its thumbnail bitmap.** Thumbnails are keyed
   `sha256(file_path)` (`ImageUtils.get_thumbnail_path`), so the file is renamed
   alongside the picture rather than abandoned: nothing sweeps
@@ -4075,11 +4112,14 @@ and updates `file_path` on the existing row instead.
   was deleted would otherwise swallow an unrelated new file of the same content,
   and the user would get a picture they cannot see instead of a new one. They do
   still count as unchanged files *blocking* a match, since their file is on disk.
-- **A present file with a NULL `pixel_sha` blocks matching for the whole pass.**
-  The column is nullable and `MissingPixelShaFinder` backfills it, so an
-  un-hashed unchanged file is invisible to the ambiguity count — and it is
-  exactly the file whose existence would have refused the match. NULL there
-  means "unknown", not "no collision".
+- **A present file with a NULL `pixel_sha` blocks matching at its own size only.**
+  The column is nullable, so an un-hashed unchanged file is invisible to the
+  ambiguity count — and it is exactly the file whose existence would have refused
+  the match. NULL there means "unknown", not "no collision", so it still refuses,
+  but only for candidates whose size it could collide with. It used to veto the
+  whole pass, and since `MissingPixelShaFinder` never backfills `deleted` rows
+  (`tasks/pixel_sha_task.py`), one un-hashed scrapheap row made that veto
+  permanent: every rename in the library became a delete plus a re-import.
 - **A followed move emits `CHANGED_PICTURES`** (`moved_picture_ids` in the task
   result, `Vault._on_task_completed`), and deliberately not `PICTURE_IMPORTED`:
   `file_path` changed on a row an open grid may already be showing, but nothing
@@ -4090,7 +4130,8 @@ and updates `file_path` on the existing row instead.
   are marked at the helper: `os.walk` is not atomic, and `MissingFilePurgeTask`
   can delete the row in the up-to-`_RESCAN_INTERVAL_S` window before the
   rescuing scan runs. Both degrade to the old delete-and-re-add; the second logs
-  a warning when it is observed.
+  a warning when it is observed, and is closed for the library's own root, whose
+  rows the sweep no longer touches.
 
 ---
 
@@ -6672,10 +6713,14 @@ the Moves artboard in `design/1.11-existing-library/`.
 new_path, detected_at)` — the raw fact a move happened, nothing derived.
 `ReferenceFolderScanTask.apply_moves` writes one row per picture in its
 `external` list, in the same transaction that updates `Picture.file_path`, and
-only when the reference folder's own `layout` column is set
-(`record_pending_reviews`): a root with no layout has no vocabulary a folder
-name could contradict, so queuing for the rest would grow the table for
-nothing ever readable off it. The task's result carries
+only when the root has a layout — the reference folder's own `layout` column,
+or `LibrarySettings.layout` for the library's own root, which the same task
+scans under `folder_id=None` (`record_pending_reviews`): a root with no layout
+has no vocabulary a folder name could contradict, so queuing for the rest would
+grow the table for nothing ever readable off it. Review paths are in
+`Picture.file_path`'s stored form, so `_classify` joins them onto the root
+before reading folders, and `layout_roots` is handed `image_root` so the
+library root is found under `None`. The task's result carries
 `external_moves_queued_for_review`, a subset of `external_moved_picture_ids`
 for exactly this reason — the two differ whenever the move happened in a root
 with no layout.

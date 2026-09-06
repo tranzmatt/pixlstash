@@ -857,7 +857,7 @@ def test_read_blocked_get_paths_name_declared_owner_class_gets():
 
     The forward direction - every locality-tier GET is *on* the belt - is
     ``tests/test_authz_host_capability_16_3.py``
-    ``::test_every_untemplated_locality_get_is_on_the_read_blocked_belt``, and it
+    ``::test_every_untemplated_owner_class_get_is_on_the_read_blocked_belt``, and it
     is not repeated here: exact matching cannot express a templated path such as
     ``/models/{model_id}/samples`` at all, so that test asserts the rule for the
     untemplated routes and pins the templated ones as a known gap. A copy here

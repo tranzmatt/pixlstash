@@ -110,21 +110,45 @@ watch(
     if (!entry) librariesStore.refresh();
     // The read's result did not survive the reload; "Back to the mapping"
     // after a failed commit needs it, and one poll brings it back.
-    if (autoCommit.value && entry.taskId) {
-      getFolderStructureReadStatus(entry.taskId)
-        .then((body) => {
-          if (body.result) readResult.value = body.result;
-        })
-        .catch((error) => {
-          console.warn("Could not reload the folder-structure read", {
-            taskId: entry.taskId,
-            error,
-          });
-        });
-    }
+    if (autoCommit.value && entry.taskId) loadReadResult(entry.taskId);
   },
   { immediate: true },
 );
+
+/** Fetch the read's result back from its task. Resolves either way. */
+async function loadReadResult(taskId) {
+  try {
+    const body = await getFolderStructureReadStatus(taskId);
+    if (body.result) readResult.value = body.result;
+  } catch (error) {
+    console.warn("Could not reload the folder-structure read", {
+      taskId,
+      error,
+    });
+  }
+}
+
+/**
+ * "Back to the mapping", from the Preview step.
+ *
+ * The mapping step cannot render without `readResult`, so pressing this when
+ * the fetch above had failed swapped the Preview for nothing at all: an empty
+ * dialog, after a commit that had just failed. Ask once more, and if the read
+ * is genuinely gone say so and stay on the Preview, whose Organise later and
+ * Cancel are both still live.
+ */
+async function backToMapping() {
+  if (!readResult.value && readTaskId.value) {
+    await loadReadResult(readTaskId.value);
+  }
+  if (readResult.value) {
+    buildError.value = "";
+    step.value = "mapping";
+    return;
+  }
+  buildError.value =
+    "The folder read this mapping came from is gone, so there is nothing to go back to. Organise later brings the pictures in and leaves naming the folders for another day.";
+}
 
 const title = computed(() => {
   switch (step.value) {
@@ -303,7 +327,7 @@ function onCommitted(result) {
       :picture-count="pictureCount"
       :library-exists="libraryExists"
       :commit-on-mount="autoCommit"
-      @back="step = 'mapping'"
+      @back="backToMapping"
       @build="build"
       @commit-started="onCommitStarted"
       @cancel="close"

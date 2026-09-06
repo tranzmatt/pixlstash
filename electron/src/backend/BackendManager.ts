@@ -12,6 +12,7 @@ import {
   activeAccelPath,
   bundledInterpreter,
   installLogPath,
+  isAccel,
   overlayDir,
   overlayMarkerPath,
   pipIndexUrl,
@@ -384,7 +385,10 @@ export class BackendManager {
   async getActiveAccel(): Promise<Accel | null> {
     try {
       const state = JSON.parse(await readFile(activeAccelPath(), 'utf8'));
-      return typeof state.accel === 'string' ? (state.accel as Accel) : null;
+      // isAccel, not `typeof === 'string'`: this value becomes a path segment
+      // under backendsRoot() and lands on the backend's PYTHONPATH, so a file
+      // holding anything but a known accelerator is treated as "no overlay".
+      return isAccel(state.accel) ? state.accel : null;
     } catch {
       return null;
     }

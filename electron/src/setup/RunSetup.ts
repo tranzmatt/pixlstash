@@ -33,6 +33,16 @@ export type SetupDeps<Accel> = {
   prepareLegacyIdentity: (source: string) => Promise<unknown>;
   /** Write the desktop's own server config. */
   writeConfig: (imageRoot: string) => void;
+  /**
+   * Remove the config this run wrote, for a setup that then could not finish.
+   *
+   * The config outlives the process, and launch shows the wizard only when
+   * there ISN'T one. A config left behind by a setup that failed therefore
+   * removes the folder picker from every later launch, and the folder it names
+   * is exactly the one the failure was about - declining the recreate offer
+   * trapped the choice it was asking you to change.
+   */
+  clearConfig: () => void;
   /** Park the privacy answer for the app, or clear a stale one with null. */
   parkTelemetry: (patch: Record<string, boolean> | null) => void;
   /** Park a finished folder read for the app, or clear one with null. */
@@ -50,6 +60,14 @@ export type SetupDeps<Accel> = {
   readFolder: (imageRoot: string) => Promise<Record<string, unknown> | null>;
   /** Tell the setup screen the reading has begun. */
   announceReading: () => void;
+  /**
+   * Tell the setup screen the download failed, at the moment it failed.
+   *
+   * The read still has to finish before anything restarts, and on a large
+   * library that is minutes - minutes the screen otherwise spent drawing a
+   * download that was already over.
+   */
+  announceInstallFailed: (message: string) => void;
 };
 
 /**
@@ -88,6 +106,30 @@ export async function runFirstRunSetup<Accel>(
   // The config is written only once any requested preparation has succeeded.
   deps.writeConfig(imageRoot);
 
+  try {
+    await afterConfig(imageRoot, choices, deps);
+  } catch (error) {
+    // Everything above this point refuses BEFORE writing a config, and every
+    // refusal below has already written one. A config is what tells the next
+    // launch there is nothing to ask, so leaving one behind for a setup that
+    // never finished takes away the folder picker - and the folder it names is
+    // the one the person was being asked to change.
+    try {
+      deps.clearConfig();
+    } catch {}
+    try {
+      deps.parkTelemetry(null);
+    } catch {}
+    throw error;
+  }
+}
+
+/** Everything after the config is written, and everything it is rolled back for. */
+async function afterConfig<Accel>(
+  imageRoot: string,
+  choices: SetupChoices,
+  deps: SetupDeps<Accel>,
+): Promise<void> {
   // The privacy answer belongs to an owner record that does not exist yet, so
   // it waits here for the app. After the config, so a setup that failed earlier
   // leaves no answer to a question the user may be asked again.
@@ -125,12 +167,19 @@ export async function runFirstRunSetup<Accel>(
 
   try {
     await deps.installOverlay(gpu);
-  } finally {
-    // Whichever finished first, the read gets to end before the restart takes
-    // its server away - including when the install threw, so a failed setup
-    // does not leave a read writing into a process that is going down.
+  } catch (error) {
+    // Say it now. The read still has to finish (below), and on a big library
+    // that is minutes; without this the screen spent them drawing a download
+    // that had already failed, and the message arrived with the wait's end
+    // rather than with the failure.
+    deps.announceInstallFailed(error instanceof Error ? error.message : String(error));
     await read;
+    throw error;
   }
+  // Whichever finished first, the read gets to end before the restart takes its
+  // server away - and on the failure path above too, because the retry the
+  // screen offers starts a new backend over this one.
+  await read;
 
   await deps.setActiveAccel(gpu);
   await deps.startBackend(gpu, true);

@@ -519,6 +519,48 @@ describe("the branches nobody walks on purpose", () => {
     wrapper.unmount();
   });
 
+  it("asks once more before sending Back to a step it cannot draw", async () => {
+    // The mount poll failed; the retry on the press succeeds. Without it, the
+    // one control offered after a failed resumed commit swapped the Preview
+    // for nothing at all.
+    getFolderStructureReadStatus.mockRejectedValueOnce(new Error("gone"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    useFolderMappingStore().save(resumed);
+    const wrapper = mountWizard({ resume: resumed });
+    await settle();
+
+    getFolderStructureReadStatus.mockResolvedValue({
+      status: "completed",
+      result: READ_RESULT,
+    });
+    wrapper.findComponent(FolderMappingPreviewStep).vm.$emit("back");
+    await settle();
+
+    expect(wrapper.find(".tree-stub").exists()).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it("stays on the Preview and says why when the read is really gone", async () => {
+    // An empty dialog is the one outcome that must not happen: the Preview
+    // keeps Organise later and Cancel, and both still work.
+    getFolderStructureReadStatus.mockRejectedValue(new Error("gone"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    useFolderMappingStore().save(resumed);
+    const wrapper = mountWizard({ resume: resumed });
+    await settle();
+
+    wrapper.findComponent(FolderMappingPreviewStep).vm.$emit("back");
+    await settle();
+
+    expect(wrapper.findComponent(FolderMappingPreviewStep).exists()).toBe(true);
+    expect(wrapper.find(".mapping-wizard__error").text()).toContain(
+      "nothing to go back to",
+    );
+
+    wrapper.unmount();
+  });
+
   it("refuses to close once a commit has started", async () => {
     // A commit runs to completion server-side and cannot be un-started, so a
     // dialog that closed over it would leave the work invisible.
