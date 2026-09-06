@@ -147,8 +147,11 @@ function hide(el) {
   el.classList.add('hidden');
 }
 function showError(msg) {
-  els.error.textContent = msg;
+  // Shown BEFORE the text goes in: `.hidden` is `display: none`, so a live
+  // region filled while it is still hidden is filled outside the accessibility
+  // tree and announces nothing.
   show(els.error);
+  els.error.textContent = msg;
 }
 
 /**
