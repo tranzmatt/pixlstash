@@ -786,7 +786,8 @@ def test_a_share_token_is_refused_on_all_three_routes(owner_env):
     root = owner_env["tmp"]
     assert anon.post(_READ, json={"path": root}, headers=share).status_code == 403
     assert anon.get(_STATUS, params={"task_id": "x"}, headers=share).status_code == 403
-    assert anon.delete(_READ, params={"task_id": "x"}, headers=share).status_code == 403
+    delete_resp = anon.delete(_READ, params={"task_id": "x"}, headers=share)
+    assert delete_resp.status_code == 403
 
 
 # ===========================================================================
