@@ -14,6 +14,8 @@ from pydantic import BaseModel, ConfigDict
 from typing import Optional
 
 from pixlstash.pixl_logging import get_logger
+from pixlstash.services.config_service import get_import_folder_paths
+from pixlstash.utils.path_utils import path_is_within
 from pixlstash.utils.reference_folder_validator import validate_reference_folder_path
 
 
@@ -45,7 +47,11 @@ class ExportStatusResponse(BaseModel):
     processed: int
     progress: float
     download_url: Optional[str] = None
-    destination: Optional[str] = None
+    # No `destination`: this route is ANY_TOKEN, whose contract is that it
+    # returns no owner data, and the folder export's destination is an
+    # absolute host path. Its POST sibling is LOOPBACK_OWNER_ONLY, so the
+    # only caller that can ever have a folder task is the one that named the
+    # folder in the first place and has nothing to learn from it coming back.
     opened: Optional[bool] = None
 
 
@@ -134,9 +140,10 @@ def register_routes(router, server):
             "Queues an asynchronous export task that writes pictures straight "
             "into a folder on the machine running PixlStash, then opens that "
             "folder in the host file manager. The destination must be an "
-            "empty, writable, existing directory. Local owner, on that "
-            "machine, only - see POST /pictures/export for a ZIP you can "
-            "download from anywhere instead."
+            "empty, writable, existing directory outside the library, its "
+            "reference folders and its import folders. "
+            "Local owner, on that machine, only - see POST /pictures/export "
+            "for a ZIP you can download from anywhere instead."
         ),
         response_model=ExportStartResponse,
     )
@@ -180,6 +187,34 @@ def register_routes(router, server):
             raise HTTPException(
                 status_code=403, detail="Destination folder is not writable."
             )
+        # A folder inside the library is a folder the library reads back:
+        # image_root is the vault's own store and every reference folder is
+        # scanned, so the copies this writes return as new pictures - and in a
+        # reference folder as duplicates of the very pictures just exported.
+        # The empty-destination rule below does not cover it: an empty new
+        # subfolder of the library passes that and is the likeliest way in.
+        #
+        # An import (watch) folder is the same class and the worst member of
+        # it: the watcher imports whatever appears there, a re-encoded export
+        # (any reduced resolution, any face/hand crop) carries a new pixel_sha
+        # so it is not deduplicated, and a folder carrying
+        # `delete_after_import` then os.remove()s the file it has just
+        # imported - so the export destroys its own output.
+        vault = request.state.library_lease.vault
+        library_roots = [getattr(vault, "image_root", None)]
+        library_roots.extend(vault.reference_folder_roots())
+        library_roots.extend(get_import_folder_paths(vault))
+        for root in library_roots:
+            if root and path_is_within(resolved_destination, root):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "That folder is part of your library - PixlStash "
+                        "reads it - so everything exported into it would be "
+                        "imported straight back in. Choose a folder outside "
+                        "your library, reference folders and import folders."
+                    ),
+                )
         # A folder export writes plain files, unlike a ZIP: a name that
         # collides with something already in the destination is silently
         # overwritten (shutil.copy2 / open(..., "w") don't refuse). Requiring
@@ -255,12 +290,10 @@ def register_routes(router, server):
                 # already on disk and the folder is opened server-side), so
                 # this is the one report the task gets - collect it now
                 # rather than leaking it in export_tasks forever.
-                destination = task.get("destination")
                 opened = task.get("opened")
                 server.export_tasks.pop(task_id, None)
                 return {
                     "status": "completed",
-                    "destination": destination,
                     "opened": opened,
                     "total": total,
                     "processed": processed,

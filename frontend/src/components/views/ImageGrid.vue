@@ -8202,10 +8202,13 @@ async function exportCurrentViewToFolder(options = {}) {
     }
 
     const count = exportProgress.processed;
-    // The server resolves the destination (realpath) before writing to it and
-    // opening it, so what it actually used can differ from the raw string the
-    // picker returned (a symlink, a trailing slash, a `..`) - show that one.
-    const resolvedDestination = completedBody.destination || destination;
+    // The folder the picker returned, not one read back off the status route:
+    // that route is any_token (a share token polls its own ZIP export through
+    // it), so it no longer reports the absolute host path it wrote to. The
+    // server resolves that path before writing, so it can differ from this one
+    // (a symlink, a trailing slash, a `..`) - this is the spelling the person
+    // actually chose, which is the one they recognise anyway.
+    const resolvedDestination = destination;
     if (completedBody.opened === false) {
       noticeStore.warning(
         `Exported ${count} picture${count === 1 ? "" : "s"} to ${resolvedDestination}, ` +

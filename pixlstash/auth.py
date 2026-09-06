@@ -112,10 +112,30 @@ READ_SAFE_POST_PATHS: frozenset[str] = frozenset(
     }
 )
 
-# GET paths that must not be accessible to READ-scoped tokens.
-# Covers sensitive user settings and all folder/filesystem endpoints - READ tokens
+# GET paths that must not be accessible to scoped (share) tokens. READ tokens
 # are allowed to access content (pictures, picture_sets, characters, projects)
-# but must never expose server filesystem or import-folder configuration.
+# but must never expose server filesystem, import-folder configuration, or any
+# other owner-only read.
+#
+# **The membership rule is arithmetic: every untemplated GET declared
+# OWNER_ONLY / LOCAL_OWNER_ONLY / LOOPBACK_OWNER_ONLY in ``authz/registry.py``
+# belongs here**, and
+# ``tests/test_authz_host_capability_16_3.py::
+# test_every_untemplated_owner_class_get_is_on_the_read_blocked_belt``
+# fails the build on one that is missing. It used to be a judgement about which
+# owner-only reads were "sensitive enough", derived only over the locality tier;
+# that judgement is what left `/insights` and `/moves/pending` - both of which
+# serve absolute host paths - off the belt with nothing to catch it (#1177 item
+# 11). An entry here is exactly redundant with the gate's own owner check while
+# the gate is enforcing, and that redundancy IS the point: AUTHZ_GATE_ENFORCING
+# is a documented one-line rollback, and this frozenset is the layer that
+# survives it. The reverse direction - no entry here may name a route that is
+# not an owner-class GET - is
+# ``tests/test_architecture_guardrails.py::
+# test_read_blocked_get_paths_name_declared_owner_class_gets``.
+#
+# Templated paths cannot be expressed in an exact-match frozenset and are a
+# recorded gap; see §16.3 in docs/backend_architecture.md.
 READ_BLOCKED_GET_PATHS: frozenset[str] = frozenset(
     {
         "/api/v1/users/me/config",
@@ -140,7 +160,7 @@ READ_BLOCKED_GET_PATHS: frozenset[str] = frozenset(
         # into it. Gate policy is OWNER_ONLY; same belt-and-braces reasoning.
         "/api/v1/taggers",
         # Found by the derivation in tests/test_authz_host_capability_16_3.py
-        # ::test_every_untemplated_locality_get_is_on_the_read_blocked_belt,
+        # ::test_every_untemplated_owner_class_get_is_on_the_read_blocked_belt,
         # not by anyone reading this list: it is LOCAL_OWNER_ONLY at the gate
         # and serves the move queue's source and destination folders, so with
         # the gate rolled back a READ token read host paths straight out of it.
@@ -180,6 +200,50 @@ READ_BLOCKED_GET_PATHS: frozenset[str] = frozenset(
         # would do, and the sample paths and mount-point findings it returns
         # are more of the owner's folder tree, not less.
         "/api/v1/server-config/layout/migration",
+        # ── The rest of the untemplated owner-class GETs ─────────────────────
+        # Added as a block by the arithmetic rule in this list's header, not
+        # one at a time by someone judging each payload. Two of them are why
+        # the rule exists (#1177 item 11): GET /insights returns the absolute
+        # path of the folder every finding points at, and GET /moves/pending
+        # returns old_path and new_path for every file moved outside
+        # PixlStash - the GET /model-moves disclosure exactly, missed because
+        # the derivation only ran over the locality tier. The others are
+        # owner-only reads that were merely never asked about; each is already
+        # refused by the gate, and listing it costs a frozenset entry and
+        # closes the rollback with it.
+        #
+        # GET /pictures/plugins is here despite the §16.3 note recording it as
+        # deliberately off this list: that note answered "is this payload
+        # sensitive?", and the question is now "is this route owner-only?".
+        "/api/v1/adapters",
+        "/api/v1/checkpoints",
+        "/api/v1/dedup/groups",
+        "/api/v1/dedup/mixed-stacks",
+        "/api/v1/dedup/policy",
+        "/api/v1/dedup/sweep/policy",
+        "/api/v1/insights",
+        "/api/v1/libraries",
+        "/api/v1/model-folders",
+        "/api/v1/model-folders/devices",
+        "/api/v1/model-stacks/proposals",
+        "/api/v1/models/base-models",
+        "/api/v1/moves/pending",
+        "/api/v1/operations",
+        "/api/v1/operations/undo-state",
+        "/api/v1/pictures/import/status",
+        "/api/v1/pictures/plugins",
+        "/api/v1/reviews",
+        "/api/v1/reviews/preview",
+        "/api/v1/server-config/scrapheap-retention",
+        "/api/v1/server-config/scrapheap-retention/impact",
+        "/api/v1/server-config/snapshots",
+        "/api/v1/snapshots",
+        "/api/v1/snapshots/status",
+        "/api/v1/tag_health",
+        "/api/v1/telemetry/install-id",
+        "/api/v1/users/me/auth",
+        "/api/v1/users/me/shared-resource-ids",
+        "/api/v1/users/me/token",
     }
 )
 

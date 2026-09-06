@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 import tempfile
+import unicodedata
 import zipfile
 
 from PIL import Image, PngImagePlugin
@@ -53,6 +54,51 @@ def _safe_archive_stem(name: str, fallback: str) -> str:
     candidate = str(name or "").replace("\\", "/").rsplit("/", 1)[-1]
     candidate = _UNSAFE_ARCNAME_CHARS_RE.sub("_", candidate).strip(". ")
     return candidate or fallback
+
+
+def _unique_export_stem(stem: str, claimed: dict) -> str:
+    """Return a member-name stem no earlier member of this export has taken.
+
+    Args:
+        stem: The candidate stem, already through :func:`_safe_archive_stem`.
+        claimed: Case-folded stem -> highest suffix tried for it. Updated in
+            place, so one dict per export run is the whole bookkeeping.
+
+    Returns:
+        A stem that is free, ``stem`` itself the first time it is asked for.
+
+    A per-stem counter on its own is not enough, and that is the bug this
+    exists for: two pictures named ``photo`` give the second ``photo_2``, which
+    silently overwrites a *third* picture actually named ``photo_2`` - a real
+    file lost on a folder export, a duplicate member in a ZIP. So every name
+    handed out is claimed and the suffix keeps rising until the claim is free.
+
+    The keys are NFC-normalised and case-folded because a folder export writes
+    real files, and the filesystems the desktop build ships to answer "same
+    path?" more loosely than Python's ``==``. ``Photo.jpg``/``photo.jpg`` are
+    one path on Windows NTFS and on default macOS APFS (case-insensitive);
+    ``café.jpg`` spelled NFC and NFD is *also* one path on APFS and HFS+,
+    which compare normalisation-insensitively - and a name that arrived from a
+    Mac is decomposed while the same name typed anywhere else is composed, so
+    a library holding both is ordinary. Case-folding alone would hand those two
+    the same file name and the second copy would silently replace the first,
+    which is the whole bug this function exists for. Reading the previous
+    suffix back as the starting point keeps this O(1) per picture rather than
+    rescanning the claimed set for every duplicate.
+    """
+
+    def _key(value: str) -> str:
+        return unicodedata.normalize("NFC", value).casefold()
+
+    key = _key(stem)
+    suffix = claimed.get(key, 1)
+    candidate = stem
+    while _key(candidate) in claimed:
+        suffix += 1
+        candidate = f"{stem}_{suffix}"
+    claimed[key] = suffix
+    claimed[_key(candidate)] = suffix
+    return candidate
 
 
 class _FolderSink:
@@ -569,6 +615,7 @@ class ExportUtils:
         use_original_file_names = params.get("use_original_file_names", False)
         tag_format_d = params.get("tag_format_d", "spaces")
         bbox_mode_d = params.get("bbox_mode_d", "none")
+        # Case-folded stem -> highest suffix tried; see _unique_export_stem.
         used_names: dict = {}
 
         for idx, pic in enumerate(pics, start=1):
@@ -597,19 +644,14 @@ class ExportUtils:
                             orig_ext or ext, ext.lstrip(".") or "bin"
                         )
                         file_ext = f".{file_ext.lstrip('.')}"
-                        # Case-folded key: a folder export writes real files, and
-                        # "Photo.jpg"/"photo.jpg" are the same path on the
-                        # case-insensitive filesystems the desktop build ships
-                        # to (Windows NTFS, default macOS APFS) - an exact-string
-                        # key would hand both the same arcname and the second
-                        # would silently overwrite the first on disk.
-                        dedup_key = orig_stem.casefold()
-                        count = used_names.get(dedup_key, 0) + 1
-                        used_names[dedup_key] = count
-                        name_stem = orig_stem if count == 1 else f"{orig_stem}_{count}"
+                        name_stem = _unique_export_stem(orig_stem, used_names)
                         arcname = f"{name_stem}{file_ext}"
                     else:
-                        name_stem = f"image_{idx:05d}"
+                        # Claimed from the same set as the original names: one
+                        # export mixes the two whenever a picture has no
+                        # original_file_name, so a picture literally called
+                        # "image_00003" must not land on index 3's fallback.
+                        name_stem = _unique_export_stem(f"image_{idx:05d}", used_names)
                         arcname = f"{name_stem}{ext}"
                     if scale_factor < 1.0 and not VideoUtils.is_video_file(full_path):
                         try:
@@ -910,7 +952,6 @@ class ExportUtils:
                 )
 
             export_tasks[task_id]["status"] = "completed"
-            export_tasks[task_id]["destination"] = destination
             export_tasks[task_id]["opened"] = opened
         except Exception as exc:
             export_tasks[task_id]["status"] = "failed"
