@@ -197,8 +197,12 @@ RELEASE_CRITICAL_MUST_BLOCK = frozenset(
 # into the ci.yml gate is the intended direction of travel; the end state is an
 # empty list and a gate that just says `tests/`.
 #
-# Known-red as of this writing: test_smart_score_invalidation.py fails on the
-# baseline (2 failures, unrelated to CI). That is what blocks the flip.
+# Known-red as of this writing: test_smart_score_invalidation.py races an async
+# invalidation that has not landed yet and returns a DIFFERENT pass count
+# depending on machine load (see ci.yml's `backend` job comment, measured
+# 2026-07-26: 41 passed idle, 4 failed under two concurrent workloads). It is
+# not merely deferred, it fails deterministically on a loaded runner, which is
+# exactly the gate's condition. That is what blocks the flip.
 DEFERRED_FROM_GATE = frozenset(
     {
         "test_anomaly_penalty.py",
@@ -211,7 +215,6 @@ DEFERRED_FROM_GATE = frozenset(
         "test_detection_model.py",
         "test_docker_windows_host_paths.py",
         "test_except_hygiene_guardrail.py",
-        "test_export_api.py",
         "test_face_detection_extreme_aspect_ratio.py",
         "test_face_extraction_speed.py",
         "test_full_pipeline.py",
@@ -237,10 +240,8 @@ DEFERRED_FROM_GATE = frozenset(
         "test_startup_banner_encoding.py",
         "test_stats_api.py",
         "test_tag_health_api.py",
-        "test_tag_prediction_backfill.py",
         "test_tag_predictions_api.py",
         "test_tag_suggestions_api.py",
-        "test_tagger_plugin_registry.py",
         "test_tagger_runs_api.py",
         "test_user_settings_tagger_settings.py",
     }
