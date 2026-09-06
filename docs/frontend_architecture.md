@@ -908,6 +908,35 @@ reproduces it with a *slow* inspect mock on purpose: with one that settles
 inside the blur's own `nextTick` the test passes either way, which is how such a
 bug survives being "covered".
 
+**A read that stops leaves the pane usable.** The path field and `Browse…` are
+disabled while a read runs, so a failed one used to freeze the whole pane with
+`Cancel` as its only live control — reached most often by a *resumed* entry,
+since the server keeps one read slot and the saved task is usually gone by the
+time "Finish organising…" is pressed. `FolderMappingScanStep` emits
+`read-failed`, which un-disables the picker while leaving the card on screen,
+and swaps its permanently-disabled `Set up my library` for `Try again`. That
+retry starts a **new** read rather than reattaching to `resumeTaskId`, which is
+precisely what failed. Pointing the field somewhere else instead drops the card
+— after the `lastAsked` guard, so the `mousedown → blur → click` on `Try again`
+does not unmount the button before the click lands. The equivalent on the
+Preview step is `Back to the mapping`: it re-fetches the read's result before
+switching, because the mapping step cannot render without one and pressing it
+after the mount poll had failed swapped the Preview for an empty dialog. If the
+read is genuinely gone it says so and stays put, keeping `Organise later` and
+`Cancel`.
+
+The read's summary states `skipped_folders` and `face_signal_ran` alongside
+`truncated` and `unreadable_folders` (integration_architecture.md §20). All four
+mean *this map is not the whole library*; `face_signal_ran: false` is the one
+that explains a People count of zero on a machine with no inference engine, and
+dropping it made the same tree read differently depending on whether models
+happened to be loaded.
+
+The Preview's "N are created or matched" sums the **per-kind** buckets. A set of
+names across kinds counted an `Alice` person and an `Alice` set once between
+them, and the sentence beside it is built from `FACET_KINDS` so a facet cannot
+be counted and left unnamed the way `tag` was.
+
 The switch confirmation is the global
 `ConfirmDialog.vue` host for `useConfirm`: it focuses the primary action, handles
 Enter/Escape through `AppDialog`, restores invoking focus on cancel, and names
