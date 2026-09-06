@@ -6,6 +6,10 @@
   delete one and it is gone from the grid. A move into a folder named after a
   project, person or set is offered in the pending-moves review, as it already
   was for reference folders.
+- `libraries backup` now counts picture files in the library folder that have
+  no PixlStash record and asks whether to include them. Enter keeps them, so a
+  restore puts back exactly what was there; `--skip-orphans` leaves them out
+  without asking, and `--yes` includes them.
 
 # [1.11.0] [Security:High]
 
