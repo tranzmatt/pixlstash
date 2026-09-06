@@ -1595,7 +1595,10 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('accel:use', async (_e, raw: unknown) => {
-    // null means "back to the bundled env"; anything else must be a known Accel.
+    // null - and undefined, which is what an argument-less invoke() sends -
+    // means "back to the bundled env". Anything else must be a known Accel.
+    // Deactivating is the safe reading of a missing argument: it is the one
+    // outcome that puts no renderer-supplied segment on a path or a PYTHONPATH.
     const accel = raw === null || raw === undefined ? null : requireAccel(raw);
     // setActiveAccel BEFORE the start is fine only because the fallback wrapper
     // guarantees a failed overlay start ends with the active state cleared

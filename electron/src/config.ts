@@ -31,9 +31,14 @@ export function isAccel(value: unknown): value is Accel {
  */
 export function requireAccel(value: unknown): Accel {
   if (!isAccel(value)) {
-    throw new Error(
-      `Unknown accelerator ${JSON.stringify(value)}; expected one of ${ACCEL_VALUES.join(', ')}`,
-    );
+    // Never JSON.stringify the value: it throws on a BigInt, and Electron IPC
+    // carries BigInt through the structured clone, so a renderer could swap the
+    // documented "Unknown accelerator" rejection for a TypeError raised while
+    // building the message. Never String() it either - that calls a `toString`
+    // the caller supplied. A string is shown (it is the realistic case: a typo
+    // like 'cuda128'), anything else is named by type only.
+    const shown = typeof value === 'string' ? JSON.stringify(value) : typeof value;
+    throw new Error(`Unknown accelerator ${shown}; expected one of ${ACCEL_VALUES.join(', ')}`);
   }
   return value;
 }

@@ -31,12 +31,17 @@ describe('requireAccel', () => {
       null,
       undefined,
       123,
+      // Structured clone carries a BigInt over IPC, and JSON.stringify throws
+      // on one: building the rejection message with it would swap this Error
+      // for a TypeError raised inside the validator.
+      1n,
+      // A caller-supplied toString must never be called to describe the value.
       { toString: () => 'cpu' },
     ]) {
       assert.throws(
         () => requireAccel(bad),
         /Unknown accelerator/,
-        `${JSON.stringify(bad)} must not be accepted as an accelerator`,
+        `${String(bad)} must not be accepted as an accelerator`,
       );
     }
   });
