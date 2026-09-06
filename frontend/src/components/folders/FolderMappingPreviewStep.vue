@@ -96,13 +96,27 @@ const lastFact = computed(() =>
     : "no folder is created inside your library",
 );
 
-const ungroupedCount = computed(() => {
-  const named = new Set();
-  for (const [, bucket] of grouped.value) {
-    for (const name of bucket.keys()) named.add(name);
-  }
-  return named;
+/**
+ * How many entities the commit creates or matches.
+ *
+ * The sum of the per-kind buckets, NOT a set of names across them: `grouped`
+ * has already collapsed same-named folders WITHIN a kind (two `Alice` folders
+ * are one Person), and collapsing across kinds as well made a `Alice` person
+ * and an `Alice` set count once between them. The number under "what happens
+ * when you press the button" then undercounted exactly the libraries that
+ * reuse a name at two levels, which is most of them.
+ */
+const entityCount = computed(() => {
+  let total = 0;
+  for (const [, bucket] of grouped.value) total += bucket.size;
+  return total;
 });
+
+// Named from FACET_KINDS rather than written out, so a facet cannot be counted
+// by the number above and left out of the sentence beside it - which is what
+// happened to Tag.
+const FACET_NAMES = FACET_KINDS.map((kind) => kind.plural.toLowerCase());
+const entityKinds = `${FACET_NAMES.slice(0, -1).join(", ")} and ${FACET_NAMES.at(-1)}`;
 
 async function poll(taskId) {
   if (disposed) return;
@@ -269,7 +283,7 @@ onUnmounted(() => {
           <span class="preview-step__fact-mark preview-step__fact-mark--yes"
             >✓</span
           >
-          {{ ungroupedCount.size }} project(s), set(s) and people are created or
+          {{ entityCount.toLocaleString() }} {{ entityKinds }} are created or
           matched
         </div>
         <div class="preview-step__fact">

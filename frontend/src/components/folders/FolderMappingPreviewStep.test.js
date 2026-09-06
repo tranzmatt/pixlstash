@@ -110,4 +110,83 @@ describe("FolderMappingPreviewStep", () => {
       null,
     );
   });
+
+  // "N are created or matched" is the only number on the screen that says how
+  // much the commit changes, and it is arithmetic nobody re-checks by eye.
+  describe("the count under 'what happens when you press the button'", () => {
+    function factText(wrapper) {
+      return wrapper
+        .findAll(".preview-step__fact")
+        .map((el) => el.text())
+        .find((text) => text.includes("created or matched"));
+    }
+
+    it("counts a name reused across two kinds once per kind", async () => {
+      // A `Wedding` set inside a `Wedding` project is two entities, and the
+      // commit creates two. Collapsing them to a single name undercounted
+      // exactly the libraries that name a folder after the thing above it.
+      const wrapper = mountStep({
+        commitOnMount: false,
+        assignments: [
+          { kind: "project", relative_path: "2024/Wedding" },
+          { kind: "set", relative_path: "2024/Wedding/Wedding" },
+        ],
+      });
+      await flushPromises();
+
+      expect(factText(wrapper)).toContain("2 ");
+    });
+
+    it("counts tags, and names them", async () => {
+      // Tags were counted by the number and left out of the sentence beside
+      // it, so a mapping of nothing but tags read as "0 ... are created".
+      const wrapper = mountStep({
+        commitOnMount: false,
+        assignments: [
+          { kind: "tag", relative_path: "beach" },
+          { kind: "tag", relative_path: "sunset" },
+        ],
+      });
+      await flushPromises();
+
+      const text = factText(wrapper);
+      expect(text).toContain("2 ");
+      expect(text).toContain("tags");
+    });
+
+    it("still collapses the same name repeated within one kind", async () => {
+      // Two `Alice` folders at different depths are one Person, and always were.
+      const wrapper = mountStep({
+        commitOnMount: false,
+        assignments: [
+          { kind: "person", relative_path: "2023/Alice" },
+          { kind: "person", relative_path: "2024/Alice" },
+        ],
+      });
+      await flushPromises();
+
+      expect(factText(wrapper)).toContain("1 ");
+    });
+
+    it("names every facet it counts", async () => {
+      // The sentence is built from FACET_KINDS so a fifth facet cannot be
+      // counted and left unnamed the way Tag was.
+      const wrapper = mountStep({
+        commitOnMount: false,
+        assignments: [
+          { kind: "project", relative_path: "p" },
+          { kind: "set", relative_path: "s" },
+          { kind: "person", relative_path: "a" },
+          { kind: "tag", relative_path: "t" },
+        ],
+      });
+      await flushPromises();
+
+      const text = factText(wrapper);
+      expect(text).toContain("4 ");
+      for (const noun of ["projects", "sets", "people", "tags"]) {
+        expect(text).toContain(noun);
+      }
+    });
+  });
 });
