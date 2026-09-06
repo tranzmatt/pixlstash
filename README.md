@@ -8,11 +8,16 @@ PixlStash is a local picture library server for organizing, filtering, and revie
 It provides:
 
 - A desktop application or a headless server with a browser-based interface
-- Automatic tagging and image descriptions with selectable AI engines (including JoyCaption)
+- Semantic search across the whole library with CLIP text queries, tagged or not (OpenCLIP ViT-B-32)
+- Face detection, face recognition and automatic grouping into named characters (InsightFace SCRFD-10G, buffalo_l or AuraFace), plus reverse face search
+- Automatic tagging and image descriptions with selectable AI engines (our own PixlStash Tagger, WD14, Florence-2, JoyCaption), chosen per request
+- Object segmentation, and reverse likeness search on CLIP embeddings
+- A tag review queue and a per-tag health board, so auto-tags become tags you can trust
+- Smart score sorting, character-likeness scoring, and calibrated anomaly detection for malformed anatomy
+- Every model runs on your own hardware (CPU, NVIDIA CUDA, or experimental AMD ROCm). No cloud API
 - Re-tag or regenerate descriptions for any selection directly from the context menu
 - Instant grid loading — thumbnails appear immediately, metadata fills in asynchronously
 - Fast metadata and tag filtering
-- Smart score sorting
 - Character and set organization
 - Local storage of your library data
 - API for integrating with other tools
@@ -34,7 +39,27 @@ PixlStash runs on your machine and serves the UI at a local (or Internet-facing)
 
 Immich is a very good home photo server. If that's what you need, use it! PixlStash does a different job.
 
-PixlStash is a tool for working with images rather than just storing them, though it works as a home server too. It adds a tag review queue so auto-tags are verified, segmentation and selectable taggers, a choice of GPU or CPU backends, and two-way ComfyUI integration: control ComfyUI from PixlStash, or call its nodes from your own workflows. Generated images return tagged, with People, Picture Set, and Project associations attached.
+**PixlStash does both of the AI features Immich is known for.** CLIP semantic
+search and InsightFace face recognition are in here too, along with duplicate
+detection. Immich documents two machine-learning tasks, smart search and facial
+recognition, and does them well for the job it is built for: finding a photo you
+already took. Immich also has OCR and mobile apps with background sync, which
+PixlStash does not.
+
+What PixlStash adds is everything that happens *after* you have found the
+pictures. It is a tool for working with images rather than just storing them,
+though it works as a home server too:
+
+- Automatic tagging and captioning, with the engine selectable per request
+- A tag review queue and a tag health board, so auto-tags are verified rather than trusted
+- Quality, anomaly and character-likeness scoring, so a large set sorts by what is worth looking at
+- Segmentation, reverse face search and reverse likeness search
+- Dataset export, and ai-toolkit run import with sample images and version history
+- Two-way ComfyUI integration: control ComfyUI from PixlStash, or call its nodes from your own workflows. Generated images return tagged, with People, Picture Set, and Project associations attached
+- A tagger plugin API, so a model we have never heard of shows up in the engine picker
+
+Full breakdown, including a capability-by-capability comparison table:
+[pixlstash.dev/ai.html](https://pixlstash.dev/ai.html).
 
 ## Install or try PixlStash
 

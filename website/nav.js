@@ -13,6 +13,7 @@
     { href: "index.html", label: "Home" },
     { href: "introduction.html", label: "Getting started" },
     { href: "features.html", label: "Features" },
+    { href: "ai.html", label: "AI" },
     { href: "comfyui.html", label: "ComfyUI" },
     {
       href: "whatsnew.html",
