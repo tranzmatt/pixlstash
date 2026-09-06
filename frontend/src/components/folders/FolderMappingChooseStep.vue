@@ -70,6 +70,15 @@ const browserOpen = ref(false);
 const pathInput = ref(null);
 /** The scan card has replaced the verdict card; the path is now fixed. */
 const scanning = ref(Boolean(props.resume));
+/**
+ * The scan card is showing a read that stopped.
+ *
+ * The card stays (it owns the message and its own Try again), but the path
+ * field and Browse come back: a read that failed on a resumed entry - the
+ * commonest case, its task long gone with the server that held it - otherwise
+ * left the whole pane frozen, with Cancel the only live control in it.
+ */
+const readFailed = ref(false);
 
 /** The path the current verdict describes, so a stale answer is never acted on.
     A ref, not a plain `let`: `canAdd` reads it. */
@@ -107,6 +116,13 @@ async function inspect() {
   // nothing at all. The button silently failed on its first press, every time.
   if (candidate && candidate === lastAsked && !inspectError.value) return;
   lastAsked = candidate;
+
+  // Past the guard, so this is a genuinely different folder: the failed scan
+  // card describes the old one, so it goes. (The guard is also what keeps the
+  // card's own Try again alive - a mousedown on it blurs this field first, and
+  // an unguarded drop would unmount the button before the click landed.)
+  scanning.value = false;
+  readFailed.value = false;
 
   verdict.value = null;
   inspectError.value = "";
@@ -191,7 +207,7 @@ onMounted(() => {
         label="Folder"
         placeholder="/home/me/Pictures"
         icon="folder-outline"
-        :disabled="scanning"
+        :disabled="scanning && !readFailed"
         @enter="inspect"
         @blur="inspect"
       />
@@ -200,7 +216,7 @@ onMounted(() => {
         class="choose-step__browse"
         size="sm"
         variant="secondary"
-        :disabled="scanning"
+        :disabled="scanning && !readFailed"
         @click="browserOpen = true"
       >
         Browse…
@@ -218,6 +234,7 @@ onMounted(() => {
       :match-existing="Boolean(resume)"
       @task="emit('task', $event)"
       @ready="emit('ready', $event)"
+      @read-failed="readFailed = $event"
       @cancel="emit('cancel')"
     />
 

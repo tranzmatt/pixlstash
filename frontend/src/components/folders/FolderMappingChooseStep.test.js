@@ -38,7 +38,10 @@ import {
   inspectLibraryPath,
   setActiveLibrary,
 } from "../../api/libraries";
-import { startFolderStructureRead } from "../../api/folderStructure";
+import {
+  getFolderStructureReadStatus,
+  startFolderStructureRead,
+} from "../../api/folderStructure";
 import {
   useLibrariesStore,
   useLibrarySwitchStore,
@@ -460,6 +463,128 @@ describe("resuming a saved read", () => {
     );
     expect(wrapper.find(".scan-step").exists()).toBe(true);
     expect(wrapper.emitted("task")[0][0]).toBe("task-7");
+  });
+});
+
+// A resumed read is the commonest way to reach a failed one: the server keeps
+// one read slot, so the saved task is usually gone by the time the row is
+// pressed. The pane used to freeze on it - the folder field and Browse are
+// disabled while a read runs, and the scan card's only enabled button was
+// Cancel.
+describe("a read that stopped", () => {
+  const RESUME = {
+    taskId: "task-7",
+    path: PICTURES.path,
+    label: "Generations",
+    mode: "local_import",
+  };
+
+  async function failedResume() {
+    getFolderStructureReadStatus.mockRejectedValue(new Error("Task not found"));
+    return settle(mountDialog({ resume: RESUME }));
+  }
+
+  it("says so and stops drawing progress", async () => {
+    const wrapper = await failedResume();
+
+    expect(wrapper.find(".scan-step__error").text()).toContain(
+      "Could not read that folder",
+    );
+    expect(wrapper.find(".scan-step__bar").exists()).toBe(false);
+  });
+
+  it("puts the folder field and Browse back", async () => {
+    const wrapper = await failedResume();
+
+    expect(
+      wrapper.find(".choose-step__field .app-input__field").element.disabled,
+    ).toBe(false);
+    expect(wrapper.find(".choose-step__browse").attributes("disabled")).toBe(
+      undefined,
+    );
+  });
+
+  it("offers a fresh read of the same folder, not the dead task again", async () => {
+    const wrapper = await failedResume();
+    startFolderStructureRead.mockResolvedValue({ task_id: "task-8" });
+
+    const again = wrapper
+      .findAll(".scan-step button")
+      .find((button) => button.text().trim() === "Try again");
+    expect(again.attributes("disabled")).toBe(undefined);
+    await again.trigger("click");
+    await settle(wrapper);
+
+    expect(startFolderStructureRead).toHaveBeenCalledWith(PICTURES.path, {
+      matchExisting: true,
+    });
+    expect(wrapper.emitted("task").at(-1)[0]).toBe("task-8");
+  });
+
+  it("drops the card when the owner points somewhere else instead", async () => {
+    const wrapper = await failedResume();
+    inspectLibraryPath.mockResolvedValue(structuredClone(VAULT));
+
+    await typePath(wrapper, "/home/me/Pictures/Elsewhere");
+
+    expect(wrapper.find(".scan-step").exists()).toBe(false);
+    expect(wrapper.find(".choose-step__verdict").exists()).toBe(true);
+  });
+});
+
+// Both fields mean "this map is not the whole library", which is the one thing
+// a summary must not leave out. `face_signal_ran: false` in particular explains
+// the People count that would otherwise read as "nobody lives here".
+describe("what the finished read says about itself", () => {
+  function completed(result) {
+    getFolderStructureReadStatus.mockResolvedValue({
+      status: "completed",
+      stage: "done",
+      processed: 3,
+      total: 3,
+      result: {
+        picture_count: 12,
+        folder_count: 3,
+        truncated: false,
+        unreadable_folders: 0,
+        skipped_folders: { hidden: 0, restricted: 0 },
+        face_signal_ran: true,
+        levels: [],
+        ...result,
+      },
+    });
+    return settle(
+      mountDialog({
+        resume: { taskId: "task-7", path: PICTURES.path, mode: "local_import" },
+      }),
+    );
+  }
+
+  it("counts the folders it left out on purpose", async () => {
+    const wrapper = await completed({
+      skipped_folders: { hidden: 4, restricted: 2 },
+    });
+
+    expect(wrapper.find(".scan-step__stats").text()).toContain("6");
+    expect(wrapper.text()).toContain("left out on purpose");
+  });
+
+  it("says nothing about them when there were none", async () => {
+    const wrapper = await completed({});
+
+    expect(wrapper.text()).not.toContain("left out on purpose");
+  });
+
+  it("says when nobody could be read as a Person", async () => {
+    const wrapper = await completed({ face_signal_ran: false });
+
+    expect(wrapper.text()).toContain("the face signal did not run");
+  });
+
+  it("says nothing about the face signal when it ran", async () => {
+    const wrapper = await completed({ face_signal_ran: true });
+
+    expect(wrapper.text()).not.toContain("the face signal did not run");
   });
 });
 
