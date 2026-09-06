@@ -41,6 +41,7 @@ function makeDeps(overrides: Partial<SetupDeps<Accel>> = {}): SetupDeps<Accel> {
       log.push(`prepareIdentity:${source}`);
     },
     writeConfig: (imageRoot) => log.push(`config:${imageRoot}`),
+    clearConfig: () => log.push('clearConfig'),
     parkTelemetry: (patch) => {
       log.push('parkTelemetry');
       parkedTelemetry.push(patch);
@@ -61,6 +62,7 @@ function makeDeps(overrides: Partial<SetupDeps<Accel>> = {}): SetupDeps<Accel> {
       return READ_RESULT;
     },
     announceReading: () => log.push('announceReading'),
+    announceInstallFailed: (message) => log.push(`installFailed:${message}`),
     ...overrides,
   };
 }
@@ -184,6 +186,30 @@ describe('first-run setup, with a GPU runtime to install', () => {
     assert.ok(log.includes('read'), 'the read still ran, and still got to finish');
   });
 
+  it('says the download failed before waiting the read out', async () => {
+    // The read can have minutes left in it. Announcing after it is announcing
+    // when the wait ends, which is not when the thing failed.
+    const read = deferred<Record<string, unknown> | null>();
+    const setup = runFirstRunSetup(
+      CHOICES,
+      makeDeps({
+        readFolder: () => read.promise,
+        installOverlay: async () => {
+          throw new Error('no wheels for this CUDA generation');
+        },
+      }),
+    );
+    await new Promise((r) => setImmediate(r));
+
+    assert.ok(
+      log.includes('installFailed:no wheels for this CUDA generation'),
+      `said nothing while the read was still going: ${log.join(' → ')}`,
+    );
+
+    read.resolve(null);
+    await assert.rejects(setup, /no wheels/);
+  });
+
   it('records the install location before anything downloads into it', async () => {
     await runFirstRunSetup({ ...CHOICES, installLocation: '/mnt/big' }, makeDeps());
 
@@ -261,9 +287,6 @@ describe('first-run setup that must refuse', () => {
   });
 
   it('leaves the privacy answer unparked when the backend will not start', async () => {
-    // The answer is parked before the start, so a refusal here leaves one
-    // behind: it is cleared by the next attempt's own park, and the app takes
-    // it only once. What must not happen is a config written and no answer.
     await assert.rejects(
       runFirstRunSetup(
         CHOICES,
@@ -275,7 +298,47 @@ describe('first-run setup that must refuse', () => {
       ),
       /unsafe file permissions/,
     );
-    assert.deepEqual(parkedTelemetry, [null]);
+    assert.deepEqual(parkedTelemetry, [null, null], 'parked, then rolled back');
+  });
+
+  it('takes the config back off disk when the setup it was written for fails', async () => {
+    // Launch shows the wizard only when there is NO config, so one left behind
+    // by a failed setup removes the folder picker from every later launch - and
+    // the folder it names is the one the failure was about. Declining the
+    // recreate offer trapped the choice it was asking you to change.
+    await assert.rejects(
+      runFirstRunSetup(
+        CHOICES,
+        makeDeps({
+          startBackend: async () => {
+            throw new Error('could not open the library database');
+          },
+        }),
+      ),
+      /library database/,
+    );
+    assert.ok(log.indexOf('config:/home/me/Pictures') < log.indexOf('clearConfig'));
+    assert.ok(log.includes('clearConfig'), log.join(' → '));
+  });
+
+  it('rolls the config back when the GPU download is what failed', async () => {
+    await assert.rejects(
+      runFirstRunSetup(
+        CHOICES,
+        makeDeps({
+          installOverlay: async () => {
+            throw new Error('no wheels for this CUDA generation');
+          },
+        }),
+      ),
+      /no wheels/,
+    );
+    assert.ok(log.includes('clearConfig'), log.join(' → '));
+  });
+
+  it('leaves the config alone when the setup finished', async () => {
+    await runFirstRunSetup(CHOICES, makeDeps());
+    assert.ok(!log.includes('clearConfig'), log.join(' → '));
   });
 });
 
