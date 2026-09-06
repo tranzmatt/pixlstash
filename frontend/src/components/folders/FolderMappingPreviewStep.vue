@@ -112,11 +112,28 @@ const entityCount = computed(() => {
   return total;
 });
 
-// Named from FACET_KINDS rather than written out, so a facet cannot be counted
-// by the number above and left out of the sentence beside it - which is what
-// happened to Tag.
-const FACET_NAMES = FACET_KINDS.map((kind) => kind.plural.toLowerCase());
-const entityKinds = `${FACET_NAMES.slice(0, -1).join(", ")} and ${FACET_NAMES.at(-1)}`;
+/**
+ * The kinds this mapping actually has, named for the sentence beside the count.
+ *
+ * Read from the same `grouped` buckets the total is summed from, so a facet
+ * cannot be counted by the number and left out of the sentence - which is what
+ * happened to Tag. Only the non-empty ones: a single mapped project used to
+ * read "1 projects, sets, people and tags are created", naming three kinds that
+ * were not there and disagreeing with its own verb.
+ *
+ * Nothing mapped is the exception, and it is not a special case: "0 projects,
+ * sets, people and tags" is true of every kind at once, so all four are named.
+ */
+const entityKinds = computed(() => {
+  const present = FACET_KINDS.filter(
+    (kind) => grouped.value.get(kind.value)?.size,
+  );
+  const names = (present.length ? present : FACET_KINDS).map((kind) =>
+    (entityCount.value === 1 ? kind.label : kind.plural).toLowerCase(),
+  );
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+});
 
 async function poll(taskId) {
   if (disposed) return;
@@ -283,8 +300,8 @@ onUnmounted(() => {
           <span class="preview-step__fact-mark preview-step__fact-mark--yes"
             >✓</span
           >
-          {{ entityCount.toLocaleString() }} {{ entityKinds }} are created or
-          matched
+          {{ entityCount.toLocaleString() }} {{ entityKinds }}
+          {{ entityCount === 1 ? "is" : "are" }} created or matched
         </div>
         <div class="preview-step__fact">
           <span class="preview-step__fact-mark"> - </span>

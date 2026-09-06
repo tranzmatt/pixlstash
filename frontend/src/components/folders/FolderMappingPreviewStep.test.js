@@ -168,6 +168,38 @@ describe("FolderMappingPreviewStep", () => {
       expect(factText(wrapper)).toContain("1 ");
     });
 
+    it("names only the kinds the mapping has, and agrees its verb", async () => {
+      // "1 projects, sets, people and tags are created or matched" named three
+      // kinds that were not in the mapping and disagreed with its own count.
+      const wrapper = mountStep({
+        commitOnMount: false,
+        assignments: [{ kind: "project", relative_path: "2024/Wedding" }],
+      });
+      await flushPromises();
+
+      const text = factText(wrapper);
+      expect(text).toContain("1 project is created or matched");
+      for (const absent of ["sets", "people", "tags"]) {
+        expect(text).not.toContain(absent);
+      }
+    });
+
+    it("names every kind when the mapping has none of them", async () => {
+      // Everything mapped to "just a folder" creates nothing, and "0 projects,
+      // sets, people and tags" is true of every kind at once.
+      const wrapper = mountStep({
+        commitOnMount: false,
+        assignments: [{ kind: "folder", relative_path: "2024" }],
+      });
+      await flushPromises();
+
+      const text = factText(wrapper);
+      expect(text).toContain("0 ");
+      for (const noun of ["projects", "sets", "people", "tags"]) {
+        expect(text).toContain(noun);
+      }
+    });
+
     it("names every facet it counts", async () => {
       // The sentence is built from FACET_KINDS so a fifth facet cannot be
       // counted and left unnamed the way Tag was.
