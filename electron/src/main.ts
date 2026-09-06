@@ -49,6 +49,7 @@ import {
   overlayDir,
   parseForcedBackend,
   readRuntimeInfo,
+  requireAccel,
   serverConfigPath,
   serverLogPath,
   setBackendsRoot,
@@ -1567,7 +1568,11 @@ function registerIpc(): void {
     return { dir: backendsRoot(), default: defaultBackendsRoot() };
   });
 
-  ipcMain.handle('accel:install', async (_e, accel: Accel) => {
+  // The three handlers below take an accelerator straight from the renderer, and
+  // an `Accel` is a path segment (see requireAccel). Validate at the boundary,
+  // before the value can reach a directory join.
+  ipcMain.handle('accel:install', async (_e, raw: unknown) => {
+    const accel = requireAccel(raw);
     if (!runtime) throw new Error('No bundled runtime available');
     // installOverlay wipes the target directory first, and a backend running on
     // this overlay holds its DLLs open - on Windows that wipe fails outright.
@@ -1589,7 +1594,12 @@ function registerIpc(): void {
     return acceleratorState();
   });
 
-  ipcMain.handle('accel:use', async (_e, accel: Accel | null) => {
+  ipcMain.handle('accel:use', async (_e, raw: unknown) => {
+    // null - and undefined, which is what an argument-less invoke() sends -
+    // means "back to the bundled env". Anything else must be a known Accel.
+    // Deactivating is the safe reading of a missing argument: it is the one
+    // outcome that puts no renderer-supplied segment on a path or a PYTHONPATH.
+    const accel = raw === null || raw === undefined ? null : requireAccel(raw);
     // setActiveAccel BEFORE the start is fine only because the fallback wrapper
     // guarantees a failed overlay start ends with the active state cleared
     // (deactivateOverlay) and a CPU backend running - and acceleratorState() is
@@ -1600,8 +1610,8 @@ function registerIpc(): void {
     return acceleratorState();
   });
 
-  ipcMain.handle('accel:remove', async (_e, accel: Accel) => {
-    await manager.remove(accel);
+  ipcMain.handle('accel:remove', async (_e, raw: unknown) => {
+    await manager.remove(requireAccel(raw));
     // Relaunch on whatever remains active (another overlay or null). A remaining
     // overlay that fails to start falls back to CPU; a null start failure
     // rethrows to the IPC caller unchanged, as before.

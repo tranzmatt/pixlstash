@@ -18,6 +18,32 @@ export function isAccel(value: unknown): value is Accel {
 }
 
 /**
+ * Narrow an accelerator that crossed a trust boundary, or throw.
+ *
+ * SECURITY: an `Accel` is a path segment ({@link overlayDir} joins it under
+ * {@link backendsRoot}) and that directory is both deleted (`accel:remove`) and
+ * put on the backend's PYTHONPATH (`accel:use`). A TypeScript parameter type is
+ * erased at runtime, so anything arriving over IPC is an arbitrary string until
+ * it passes through here: `../..` would escape the overlay root, making the
+ * removal an arbitrary recursive delete and the launch an arbitrary-PYTHONPATH
+ * code-execution primitive. Every renderer-supplied accelerator MUST go through
+ * this before it reaches BackendManager.
+ */
+export function requireAccel(value: unknown): Accel {
+  if (!isAccel(value)) {
+    // Never JSON.stringify the value: it throws on a BigInt, and Electron IPC
+    // carries BigInt through the structured clone, so a renderer could swap the
+    // documented "Unknown accelerator" rejection for a TypeError raised while
+    // building the message. Never String() it either - that calls a `toString`
+    // the caller supplied. A string is shown (it is the realistic case: a typo
+    // like 'cuda128'), anything else is named by type only.
+    const shown = typeof value === 'string' ? JSON.stringify(value) : typeof value;
+    throw new Error(`Unknown accelerator ${shown}; expected one of ${ACCEL_VALUES.join(', ')}`);
+  }
+  return value;
+}
+
+/**
  * Parse the developer/CI hardware-detection override. The override fakes which
  * GPU the machine appears to have so the backend-download/overlay flow can be
  * exercised on hardware that lacks the matching GPU. It is read from, in order
