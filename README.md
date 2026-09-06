@@ -10,7 +10,7 @@ It provides:
 - A desktop application or a headless server with a browser-based interface
 - Semantic search across the whole library with CLIP text queries, tagged or not (OpenCLIP ViT-B-32)
 - Face detection, face recognition and automatic grouping into named characters (InsightFace SCRFD-10G, buffalo_l or AuraFace), plus reverse face search
-- Automatic tagging and image descriptions with selectable AI engines (WD14, Florence-2, JoyCaption), chosen per request
+- Automatic tagging and image descriptions with selectable AI engines (our own PixlStash Tagger, WD14, Florence-2, JoyCaption), chosen per request
 - Object segmentation, and reverse likeness search on CLIP embeddings
 - A tag review queue and a per-tag health board, so auto-tags become tags you can trust
 - Smart score sorting, character-likeness scoring, and calibrated anomaly detection for malformed anatomy

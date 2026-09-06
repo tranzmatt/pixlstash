@@ -15,7 +15,12 @@
       href="https://fonts.googleapis.com/css2?family=Tiny5&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <script>try{if(localStorage.getItem('pixlstash-theme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}</script>
+    <script>
+      try {
+        if (localStorage.getItem("pixlstash-theme") === "light")
+          document.documentElement.setAttribute("data-theme", "light");
+      } catch (e) {}
+    </script>
     <link rel="stylesheet" href="pixlstash.css" />
     <style>
       /* ── ai.html page-specific ── */
@@ -24,10 +29,18 @@
          no new hue enters the brand. Carried as a rule and a tinted badge,
          never as small coloured text: raspberry on panel is ~3.1:1 and
          warm-white on amber ~3.3:1, both under the 4.5:1 floor. */
-      .stage-1 { --stage: var(--tertiary); }
-      .stage-2 { --stage: var(--secondary); }
-      .stage-3 { --stage: var(--accent); }
-      .stage-4 { --stage: var(--primary); }
+      .stage-1 {
+        --stage: var(--tertiary);
+      }
+      .stage-2 {
+        --stage: var(--secondary);
+      }
+      .stage-3 {
+        --stage: var(--accent);
+      }
+      .stage-4 {
+        --stage: var(--primary);
+      }
 
       .section {
         margin-top: 72px;
@@ -239,7 +252,7 @@
           "Automatic face grouping into named characters",
           "Reverse face search from an uploaded image",
           "Reverse likeness search on CLIP embeddings",
-          "Automatic tagging with selectable engines (WD14 wd-convnext-tagger-v3, Florence-2, JoyCaption)",
+          "Automatic tagging with selectable engines (PixlStash Tagger, WD14 wd-convnext-tagger-v3, Florence-2, JoyCaption)",
           "Image captions and descriptions (JoyCaption, Florence-2)",
           "Object segmentation (Florence-2)",
           "Sentence-embedding text search (SBERT)",
@@ -253,7 +266,7 @@
           "Dataset export for training",
           "ai-toolkit run import with sample images and version history",
           "Two-way ComfyUI integration with tagged round-trip",
-          "Tagger plugin API for adding your own engine",
+          "Tagger plugin API, with a published catalogue including a Moondream2 captioner and an OpenAI-compatible vision API captioner",
           "NVIDIA CUDA, experimental AMD ROCm, or CPU inference",
           "All inference runs locally, no cloud API"
         ]
@@ -269,8 +282,8 @@
         <h1>The AI features</h1>
         <p>
           Most photo servers use AI to help you find a picture. PixlStash uses
-          it to help you work on a set of them.<br />Every model below runs on
-          your own machine. Nothing is sent to an API.
+          it to help you work on them. Every model below runs on your own
+          machine. Nothing is sent to an API.
         </p>
       </div>
 
@@ -299,18 +312,19 @@
           </li>
           <li class="stage-3">
             <span class="ai-loop__num">STAGE 3</span>
-            <h3>Score</h3>
+            <h3>Score and search</h3>
             <p>
               Quality, likeness and anomaly scores that sort the good pictures
-              to the front of a large set.
+              to the front of a large set and the crap ones to the back. Search
+              by likeness.
             </p>
           </li>
           <li class="stage-4">
             <span class="ai-loop__num">STAGE 4</span>
             <h3>Train and generate</h3>
             <p>
-              Export the set, track the run it produced, and send new work back
-              in already tagged.
+              Export the set, track the training run it produced, and bring back
+              a LoRA to present to workflows.
             </p>
           </li>
         </ol>
@@ -352,7 +366,8 @@
               along. Batch or single image.
             </p>
             <p class="ai-card__model">
-              WD14 wd-convnext-tagger-v3, Florence-2, JoyCaption
+              PixlStash Tagger (a wd-convnext-tagger-v3 finetune), WD14
+              wd-convnext-tagger-v3, Florence-2, JoyCaption
             </p>
           </div>
           <div class="ai-card">
@@ -386,9 +401,13 @@
             <p>
               The tagger plugin API is the same one the built-in engines use.
               Point it at a model we have never heard of and it appears in the
-              engine picker.
+              engine picker. Moondream2 already ships in the published plugin
+              catalogue, so does a captioner for any OpenAI-compatible vision
+              API. Install either with one command.
             </p>
-            <p class="ai-card__model">Python plugin, template included</p>
+            <p class="ai-card__model">
+              pixlstash-cli plugins install moondream2
+            </p>
           </div>
         </div>
       </section>
@@ -440,7 +459,7 @@
 
       <section class="section stage-3" aria-labelledby="stage-score">
         <div class="ai-stage-head">
-          <h2 id="stage-score">Score</h2>
+          <h2 id="stage-score">Score and search</h2>
           <span class="ai-stage-head__step">STAGE 3 OF 4</span>
         </div>
         <div class="ai-grid">
@@ -463,7 +482,9 @@
               families and combined so one bad hand tagged three ways is not
               punished three times.
             </p>
-            <p class="ai-card__model">ViT classifier, noisy-OR family grouping</p>
+            <p class="ai-card__model">
+              ViT classifier, noisy-OR family grouping
+            </p>
           </div>
           <div class="ai-card">
             <h3>Character likeness</h3>
@@ -472,7 +493,9 @@
               can find the shots that actually look like the subject rather than
               merely contain them.
             </p>
-            <p class="ai-card__model">InsightFace embeddings, cosine similarity</p>
+            <p class="ai-card__model">
+              InsightFace embeddings, cosine similarity
+            </p>
           </div>
           <div class="ai-card">
             <h3>Reverse face search</h3>
@@ -616,11 +639,6 @@
                 <td>No</td>
               </tr>
               <tr>
-                <th scope="row">Mobile apps with background sync</th>
-                <td class="yes">Yes</td>
-                <td>No</td>
-              </tr>
-              <tr>
                 <th scope="row">Automatic tagging</th>
                 <td>No</td>
                 <td class="yes">Yes, engine selectable per request</td>
@@ -676,18 +694,17 @@
         <p class="ai-note" style="margin-top: 22px">
           Immich documents two machine-learning tasks, smart search and facial
           recognition, and does them well for the job it is built for: finding a
-          photo you already took. PixlStash does both of those and then keeps
-          going, because finding the picture is the start of the work rather
-          than the end of it.
+          photo you already took. PixlStash does both of those and then adds
+          additional features for <b>working</b> with images.
         </p>
       </section>
 
       <div class="page-footer">
         <p>
           <a href="features.html">See the rest of the features</a>
-          &nbsp;·&nbsp;
+          &nbsp;-&nbsp;
           <a href="install.html">Install PixlStash</a>
-          &nbsp;·&nbsp;
+          &nbsp;-&nbsp;
           <a href="index.html">Back to PixlStash home</a>
         </p>
       </div>
