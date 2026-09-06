@@ -860,6 +860,13 @@ ROUTE_POLICIES: dict[tuple[str, str], RoutePolicy] = {
             "open/files/commit siblings are already owner only"
         ),
     ),
+    # ANY_TOKEN and it must stay payload-clean to earn that: a share token can
+    # legitimately start a ZIP export (GET /pictures/export is scoped_list) and
+    # therefore has to be able to poll it, so the tier cannot be raised to match
+    # its OTHER sibling, POST /pictures/export/folder (loopback_owner_only).
+    # The folder branch used to return that export's absolute host path here,
+    # which is owner data in an any_token payload - it no longer does. Do not
+    # put a host path, a picture id or a filename in this response.
     ("GET", "/api/v1/pictures/export/status"): RoutePolicy(_ANY),
     ("GET", "/api/v1/pictures/export/download/{task_id}"): RoutePolicy(_ANY),
     ("POST", "/api/v1/pictures/export/folder"): RoutePolicy(

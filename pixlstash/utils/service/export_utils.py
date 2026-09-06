@@ -55,6 +55,40 @@ def _safe_archive_stem(name: str, fallback: str) -> str:
     return candidate or fallback
 
 
+def _unique_export_stem(stem: str, claimed: dict) -> str:
+    """Return a member-name stem no earlier member of this export has taken.
+
+    Args:
+        stem: The candidate stem, already through :func:`_safe_archive_stem`.
+        claimed: Case-folded stem -> highest suffix tried for it. Updated in
+            place, so one dict per export run is the whole bookkeeping.
+
+    Returns:
+        A stem that is free, ``stem`` itself the first time it is asked for.
+
+    A per-stem counter on its own is not enough, and that is the bug this
+    exists for: two pictures named ``photo`` give the second ``photo_2``, which
+    silently overwrites a *third* picture actually named ``photo_2`` - a real
+    file lost on a folder export, a duplicate member in a ZIP. So every name
+    handed out is claimed and the suffix keeps rising until the claim is free.
+
+    The keys are case-folded because a folder export writes real files, and
+    ``Photo.jpg``/``photo.jpg`` are the same path on the case-insensitive
+    filesystems the desktop build ships to (Windows NTFS, default macOS APFS).
+    Reading the previous suffix back as the starting point keeps this O(1) per
+    picture rather than rescanning the claimed set for every duplicate.
+    """
+    key = stem.casefold()
+    suffix = claimed.get(key, 1)
+    candidate = stem
+    while candidate.casefold() in claimed:
+        suffix += 1
+        candidate = f"{stem}_{suffix}"
+    claimed[key] = suffix
+    claimed[candidate.casefold()] = suffix
+    return candidate
+
+
 class _FolderSink:
     """Write export members as plain files instead of into a ZIP archive.
 
@@ -569,6 +603,7 @@ class ExportUtils:
         use_original_file_names = params.get("use_original_file_names", False)
         tag_format_d = params.get("tag_format_d", "spaces")
         bbox_mode_d = params.get("bbox_mode_d", "none")
+        # Case-folded stem -> highest suffix tried; see _unique_export_stem.
         used_names: dict = {}
 
         for idx, pic in enumerate(pics, start=1):
@@ -597,19 +632,14 @@ class ExportUtils:
                             orig_ext or ext, ext.lstrip(".") or "bin"
                         )
                         file_ext = f".{file_ext.lstrip('.')}"
-                        # Case-folded key: a folder export writes real files, and
-                        # "Photo.jpg"/"photo.jpg" are the same path on the
-                        # case-insensitive filesystems the desktop build ships
-                        # to (Windows NTFS, default macOS APFS) - an exact-string
-                        # key would hand both the same arcname and the second
-                        # would silently overwrite the first on disk.
-                        dedup_key = orig_stem.casefold()
-                        count = used_names.get(dedup_key, 0) + 1
-                        used_names[dedup_key] = count
-                        name_stem = orig_stem if count == 1 else f"{orig_stem}_{count}"
+                        name_stem = _unique_export_stem(orig_stem, used_names)
                         arcname = f"{name_stem}{file_ext}"
                     else:
-                        name_stem = f"image_{idx:05d}"
+                        # Claimed from the same set as the original names: one
+                        # export mixes the two whenever a picture has no
+                        # original_file_name, so a picture literally called
+                        # "image_00003" must not land on index 3's fallback.
+                        name_stem = _unique_export_stem(f"image_{idx:05d}", used_names)
                         arcname = f"{name_stem}{ext}"
                     if scale_factor < 1.0 and not VideoUtils.is_video_file(full_path):
                         try:
@@ -910,7 +940,6 @@ class ExportUtils:
                 )
 
             export_tasks[task_id]["status"] = "completed"
-            export_tasks[task_id]["destination"] = destination
             export_tasks[task_id]["opened"] = opened
         except Exception as exc:
             export_tasks[task_id]["status"] = "failed"

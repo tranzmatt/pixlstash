@@ -12,7 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from pixlstash.server import Server
-from pixlstash.utils.service.export_utils import _safe_archive_stem
+from pixlstash.utils.service.export_utils import (
+    _safe_archive_stem,
+    _unique_export_stem,
+)
 from tests.utils import upload_pictures_and_wait
 
 PICTURES_DIR = os.path.join(os.path.dirname(__file__), "..", "pictures")
@@ -153,6 +156,38 @@ def test_safe_archive_stem_preserves_legitimate_names():
     assert _safe_archive_stem("a-b_c.1", "fb") == "a-b_c.1"
 
 
+def test_unique_export_stem_never_hands_out_a_name_twice():
+    """One picture must never be written over another (#1177 item 1).
+
+    The third case is the bug: a per-stem counter alone turns the second
+    ``photo`` into ``photo_2``, which is the name of a picture that already
+    exists in the library. In a folder export that is one file silently
+    replacing another; in a ZIP it is a duplicate member. The case-folded pair
+    covers the case-insensitive filesystems the desktop build ships to.
+    """
+    claimed: dict = {}
+    stems = ["photo", "photo", "photo_2", "Photo", "holiday", "photo_2"]
+    handed_out = [_unique_export_stem(s, claimed) for s in stems]
+
+    folded = [name.casefold() for name in handed_out]
+    assert len(set(folded)) == len(folded), handed_out
+    # The first claim of a name is that name; only later ones are suffixed.
+    assert handed_out[0] == "photo"
+    assert handed_out[4] == "holiday"
+
+
+def test_unique_export_stem_stays_linear_on_a_large_duplicate_run():
+    """Claiming names must not degrade into a rescan per picture: a library of
+    identically-named originals is the normal case this guard exists for, not
+    an exotic one."""
+    claimed: dict = {}
+    handed_out = [_unique_export_stem("photo", claimed) for _ in range(2000)]
+    assert len(set(handed_out)) == 2000
+    # One key per name handed out, plus nothing else: no accumulating scan
+    # state, which is what would make this quadratic.
+    assert len(claimed) == 2000
+
+
 def test_export_status_unknown_task_returns_404():
     temp_dir, client, server = _setup()
     try:
@@ -197,9 +232,14 @@ def test_pictures_export_folder_writes_files_and_opens_it():
 
             status = _wait_for_export(client, task_id)
             assert status["status"] == "completed"
-            assert status.get("destination") == destination
             assert status.get("download_url") is None
             assert status.get("opened") is True
+            # GET /pictures/export/status is any_token - a share token polls
+            # its own ZIP export through it - so the folder export's absolute
+            # host destination must not come back in that payload (#1177 item
+            # 12). The caller supplied it; it has nothing to learn from it.
+            assert "destination" not in status, status
+            assert destination not in json.dumps(status)
 
             opener.assert_called_once_with(destination)
 
@@ -286,6 +326,45 @@ def test_pictures_export_folder_rejects_non_empty_destination():
             "/pictures/export/folder", params={"destination": destination}
         )
         assert resp.status_code == 409
+    finally:
+        server.close()
+        temp_dir.cleanup()
+        gc.collect()
+
+
+def test_pictures_export_folder_rejects_a_destination_inside_the_library():
+    """An empty new subfolder of the library passes every other check (#1177
+    item 2): it exists, it is writable, it is not on the system blocklist and it
+    is empty. It is also read back by the library that just wrote it, so the
+    export returns as a fresh set of pictures. The refusal is the only thing
+    standing between "Export to folder" and duplicating the library into
+    itself."""
+    from unittest import mock
+
+    temp_dir, client, server = _setup()
+    try:
+        _upload_picture(client)
+        inside = os.path.join(server.vault.image_root, "exported")
+        os.makedirs(inside, exist_ok=True)
+
+        resp = client.post("/pictures/export/folder", params={"destination": inside})
+        assert resp.status_code == 400, resp.text
+        assert "inside your library" in resp.json().get("detail", "")
+
+        # The positive control, in the same environment: a folder that is not
+        # inside the library is still accepted. Over-blocking every empty
+        # folder would pass the assertion above and break the feature.
+        outside = os.path.join(temp_dir.name, "outside-destination")
+        os.makedirs(outside, exist_ok=True)
+        with mock.patch(
+            "pixlstash.utils.service.export_utils.open_in_file_manager",
+            return_value=True,
+        ):
+            accepted = client.post(
+                "/pictures/export/folder", params={"destination": outside}
+            )
+            assert accepted.status_code == 200, accepted.text
+            _wait_for_export(client, accepted.json()["task_id"])
     finally:
         server.close()
         temp_dir.cleanup()

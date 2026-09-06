@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Optional
 
 from pixlstash.pixl_logging import get_logger
+from pixlstash.utils.path_utils import path_is_within
 from pixlstash.utils.reference_folder_validator import validate_reference_folder_path
 
 
@@ -45,7 +46,11 @@ class ExportStatusResponse(BaseModel):
     processed: int
     progress: float
     download_url: Optional[str] = None
-    destination: Optional[str] = None
+    # No `destination`: this route is ANY_TOKEN, whose contract is that it
+    # returns no owner data, and the folder export's destination is an
+    # absolute host path. Its POST sibling is LOOPBACK_OWNER_ONLY, so the
+    # only caller that can ever have a folder task is the one that named the
+    # folder in the first place and has nothing to learn from it coming back.
     opened: Optional[bool] = None
 
 
@@ -134,9 +139,9 @@ def register_routes(router, server):
             "Queues an asynchronous export task that writes pictures straight "
             "into a folder on the machine running PixlStash, then opens that "
             "folder in the host file manager. The destination must be an "
-            "empty, writable, existing directory. Local owner, on that "
-            "machine, only - see POST /pictures/export for a ZIP you can "
-            "download from anywhere instead."
+            "empty, writable, existing directory outside the library itself. "
+            "Local owner, on that machine, only - see POST /pictures/export "
+            "for a ZIP you can download from anywhere instead."
         ),
         response_model=ExportStartResponse,
     )
@@ -180,6 +185,25 @@ def register_routes(router, server):
             raise HTTPException(
                 status_code=403, detail="Destination folder is not writable."
             )
+        # A folder inside the library is a folder the library reads back:
+        # image_root is the vault's own store and every reference folder is
+        # scanned, so the copies this writes return as new pictures - and in a
+        # reference folder as duplicates of the very pictures just exported.
+        # The empty-destination rule below does not cover it: an empty new
+        # subfolder of the library passes that and is the likeliest way in.
+        vault = request.state.library_lease.vault
+        library_roots = [getattr(vault, "image_root", None)]
+        library_roots.extend(vault.reference_folder_roots())
+        for root in library_roots:
+            if root and path_is_within(resolved_destination, root):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "That folder is inside your library, so everything "
+                        "exported into it would be read straight back in. "
+                        "Choose a folder outside your library."
+                    ),
+                )
         # A folder export writes plain files, unlike a ZIP: a name that
         # collides with something already in the destination is silently
         # overwritten (shutil.copy2 / open(..., "w") don't refuse). Requiring
@@ -255,12 +279,10 @@ def register_routes(router, server):
                 # already on disk and the folder is opened server-side), so
                 # this is the one report the task gets - collect it now
                 # rather than leaking it in export_tasks forever.
-                destination = task.get("destination")
                 opened = task.get("opened")
                 server.export_tasks.pop(task_id, None)
                 return {
                     "status": "completed",
-                    "destination": destination,
                     "opened": opened,
                     "total": total,
                     "processed": processed,
