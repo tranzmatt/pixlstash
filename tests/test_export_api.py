@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import time
+import unicodedata
 import zipfile
 from io import BytesIO
 
@@ -174,6 +175,28 @@ def test_unique_export_stem_never_hands_out_a_name_twice():
     # The first claim of a name is that name; only later ones are suffixed.
     assert handed_out[0] == "photo"
     assert handed_out[4] == "holiday"
+
+
+def test_unique_export_stem_separates_nfc_and_nfd_spellings():
+    """Case-folding alone is not what "same file" means on macOS.
+
+    APFS and HFS+ compare normalisation-insensitively as well as
+    case-insensitively, so ``café.jpg`` composed (NFC, typed anywhere) and
+    decomposed (NFD, the spelling a file arriving from a Mac carries) are one
+    path - and a library holding both is ordinary rather than exotic. A
+    case-folded-only key hands them the same name and the second export copy
+    silently replaces the first, which is the very bug this function exists
+    for. The names handed out must therefore differ after normalisation, not
+    merely as Python strings.
+    """
+    composed = "\u00e9clair"  # NFC
+    decomposed = "e\u0301clair"  # NFD - the same file name on APFS/HFS+
+    assert composed != decomposed
+    claimed: dict = {}
+    handed_out = [_unique_export_stem(stem, claimed) for stem in (composed, decomposed)]
+    normalised = [unicodedata.normalize("NFC", name) for name in handed_out]
+    assert len(set(normalised)) == 2, handed_out
+    assert handed_out[0] == composed
 
 
 def test_unique_export_stem_stays_linear_on_a_large_duplicate_run():
@@ -349,7 +372,7 @@ def test_pictures_export_folder_rejects_a_destination_inside_the_library():
 
         resp = client.post("/pictures/export/folder", params={"destination": inside})
         assert resp.status_code == 400, resp.text
-        assert "inside your library" in resp.json().get("detail", "")
+        assert "part of your library" in resp.json().get("detail", "")
 
         # The positive control, in the same environment: a folder that is not
         # inside the library is still accepted. Over-blocking every empty
@@ -365,6 +388,44 @@ def test_pictures_export_folder_rejects_a_destination_inside_the_library():
             )
             assert accepted.status_code == 200, accepted.text
             _wait_for_export(client, accepted.json()["task_id"])
+    finally:
+        server.close()
+        temp_dir.cleanup()
+        gc.collect()
+
+
+def test_pictures_export_folder_rejects_a_destination_in_a_watched_folder():
+    """An import folder is the same refusal as a reference folder, and worse.
+
+    The reference-folder case duplicates the library. A watch folder *also*
+    re-imports - a re-encoded export carries a new ``pixel_sha`` so the
+    duplicate check does not catch it - and a folder carrying
+    ``delete_after_import`` then removes the file it just imported
+    (``pixlstash/tasks/watch_folder_import_task.py``), so the export destroys
+    its own output. Found by the adversarial review of #1177 item 2, which had
+    covered ``image_root`` and the reference folders but not this sibling.
+    """
+    temp_dir, client, server = _setup()
+    try:
+        watched = os.path.join(temp_dir.name, "watched")
+        os.makedirs(watched, exist_ok=True)
+        added = client.post(
+            "/import-folders",
+            json={
+                "folder": watched,
+                "label": "watched",
+                "delete_after_import": True,
+            },
+        )
+        assert added.status_code == 200, added.text
+
+        destination = os.path.join(watched, "exported")
+        os.makedirs(destination, exist_ok=True)
+        resp = client.post(
+            "/pictures/export/folder", params={"destination": destination}
+        )
+        assert resp.status_code == 400, resp.text
+        assert "part of your library" in resp.json().get("detail", "")
     finally:
         server.close()
         temp_dir.cleanup()

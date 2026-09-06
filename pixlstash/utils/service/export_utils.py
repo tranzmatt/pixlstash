@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 import tempfile
+import unicodedata
 import zipfile
 
 from PIL import Image, PngImagePlugin
@@ -72,20 +73,31 @@ def _unique_export_stem(stem: str, claimed: dict) -> str:
     file lost on a folder export, a duplicate member in a ZIP. So every name
     handed out is claimed and the suffix keeps rising until the claim is free.
 
-    The keys are case-folded because a folder export writes real files, and
-    ``Photo.jpg``/``photo.jpg`` are the same path on the case-insensitive
-    filesystems the desktop build ships to (Windows NTFS, default macOS APFS).
-    Reading the previous suffix back as the starting point keeps this O(1) per
-    picture rather than rescanning the claimed set for every duplicate.
+    The keys are NFC-normalised and case-folded because a folder export writes
+    real files, and the filesystems the desktop build ships to answer "same
+    path?" more loosely than Python's ``==``. ``Photo.jpg``/``photo.jpg`` are
+    one path on Windows NTFS and on default macOS APFS (case-insensitive);
+    ``café.jpg`` spelled NFC and NFD is *also* one path on APFS and HFS+,
+    which compare normalisation-insensitively - and a name that arrived from a
+    Mac is decomposed while the same name typed anywhere else is composed, so
+    a library holding both is ordinary. Case-folding alone would hand those two
+    the same file name and the second copy would silently replace the first,
+    which is the whole bug this function exists for. Reading the previous
+    suffix back as the starting point keeps this O(1) per picture rather than
+    rescanning the claimed set for every duplicate.
     """
-    key = stem.casefold()
+
+    def _key(value: str) -> str:
+        return unicodedata.normalize("NFC", value).casefold()
+
+    key = _key(stem)
     suffix = claimed.get(key, 1)
     candidate = stem
-    while candidate.casefold() in claimed:
+    while _key(candidate) in claimed:
         suffix += 1
         candidate = f"{stem}_{suffix}"
     claimed[key] = suffix
-    claimed[candidate.casefold()] = suffix
+    claimed[_key(candidate)] = suffix
     return candidate
 
 
